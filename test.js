@@ -109,12 +109,14 @@ await new Promise((r) => setTimeout(r, 50));
 assert.equal(p1.kills, 0, 'restart_match should reset player kills');
 assert.equal(match.scores.BLUE, 0, 'restart_match should reset team score');
 
-// Test Grenade (G) and Flashbang (F) throw + physics
+// Test Grenade (G) and Flashbang (F) throw + physics + thin-wall bounce
 assert.equal(p1.grenades, 2, 'Player should start with 2 grenades');
 assert.equal(p1.flashes, 2, 'Player should start with 2 flashbangs');
-const testProj = { x: 0, y: 1.5, z: 0, vx: 0, vy: 2, vz: -10 };
-stepThrowablePhysics(testProj, 0.1, []);
-assert.ok(testProj.z < 0, 'Throwable should advance along throw vector');
+const testProj = { x: 0, y: 1.0, z: -2.0, vx: 0, vy: 0, vz: 20 };
+const thinBarrier = [{ x: 0, y: 0, z: 0, w: 6, h: 2.0, d: 1.2 }];
+stepThrowablePhysics(testProj, 0.08, thinBarrier);
+assert.ok(testProj.z < -0.6, 'Grenade should bounce off front face of thin barrier instead of tunneling through');
+assert.ok(testProj.vz < 0, 'Grenade velocity Z should reverse on bounce');
 
 c1.ws.send(JSON.stringify({ type: 'throw', kind: 'GRENADE', origin: { x: -37, y: 1.5, z: -5 }, dir: { x: 0, y: 0, z: 1 } }));
 await new Promise((r) => setTimeout(r, 50));

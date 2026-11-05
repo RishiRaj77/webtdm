@@ -188,6 +188,172 @@ export const SPAWN_POINTS = {
   ]
 };
 
+export const MAPS = {
+  WAREHOUSE: {
+    id: 'WAREHOUSE',
+    name: 'Warehouse',
+    desc: 'Industrial Hangar • CQB & Side Lanes',
+    skyColor: 0x18222f,
+    fogColor: 0x18222f,
+    fogDensity: 0.0065,
+    floorBase: '#252a32',
+    floorGrid: '#2f3640',
+    roofBeams: true,
+    boxes: MAP_BOXES,
+    spawns: SPAWN_POINTS
+  },
+  RUINS: {
+    id: 'RUINS',
+    name: 'Desert Ruins',
+    desc: 'Ancient Temple • Open Sightlines & Pillars',
+    skyColor: 0x2d2118,
+    fogColor: 0x2d2118,
+    fogDensity: 0.0055,
+    floorBase: '#6b583e',
+    floorGrid: '#594832',
+    roofBeams: false,
+    boxes: [
+      // Perimeter sandstone walls
+      { x: 0, y: 0, z: -58, w: 84, h: 9, d: 1.5, color: 0x8c7355, tag: 'wall' },
+      { x: 0, y: 0, z: 58, w: 84, h: 9, d: 1.5, color: 0x8c7355, tag: 'wall' },
+      { x: -42, y: 0, z: 0, w: 1.5, h: 9, d: 116, color: 0x8c7355, tag: 'wall' },
+      { x: 42, y: 0, z: 0, w: 1.5, h: 9, d: 116, color: 0x8c7355, tag: 'wall' },
+
+      // Spawn Shield Walls
+      { x: 0, y: 0, z: -44, w: 20, h: 4.0, d: 1.5, color: 0x3b5978, tag: 'cover' },
+      { x: -21, y: 0, z: -46, w: 9, h: 3.5, d: 1.5, color: 0x3b5978, tag: 'cover' },
+      { x: 21, y: 0, z: -46, w: 9, h: 3.5, d: 1.5, color: 0x3b5978, tag: 'cover' },
+
+      { x: 0, y: 0, z: 44, w: 20, h: 4.0, d: 1.5, color: 0x783b3b, tag: 'cover' },
+      { x: -21, y: 0, z: 46, w: 9, h: 3.5, d: 1.5, color: 0x783b3b, tag: 'cover' },
+      { x: 21, y: 0, z: 46, w: 9, h: 3.5, d: 1.5, color: 0x783b3b, tag: 'cover' },
+
+      // Elevated Sandstone Balconies in Spawn + Steps
+      { x: -32, y: 0, z: -50, w: 11, h: 2.2, d: 8, color: 0x9e8462, tag: 'deck' },
+      { x: -24.5, y: 0, z: -50, w: 4, h: 1.1, d: 4, color: 0xb0946f, tag: 'crate' },
+      { x: 32, y: 0, z: -50, w: 11, h: 2.2, d: 8, color: 0x9e8462, tag: 'deck' },
+      { x: 24.5, y: 0, z: -50, w: 4, h: 1.1, d: 4, color: 0xb0946f, tag: 'crate' },
+
+      { x: -32, y: 0, z: 50, w: 11, h: 2.2, d: 8, color: 0x9e8462, tag: 'deck' },
+      { x: -24.5, y: 0, z: 50, w: 4, h: 1.1, d: 4, color: 0xb0946f, tag: 'crate' },
+      { x: 32, y: 0, z: 50, w: 11, h: 2.2, d: 8, color: 0x9e8462, tag: 'deck' },
+      { x: 24.5, y: 0, z: 50, w: 4, h: 1.1, d: 4, color: 0xb0946f, tag: 'crate' },
+
+      // Central Raised Sanctuary Platform + Climb Steps + Obelisk
+      { x: 0, y: 0, z: 0, w: 18, h: 1.6, d: 18, color: 0xa38968, tag: 'deck' },
+      { x: 0, y: 0, z: -11, w: 6, h: 0.8, d: 4, color: 0xb59a76, tag: 'crate' },
+      { x: 0, y: 0, z: 11, w: 6, h: 0.8, d: 4, color: 0xb59a76, tag: 'crate' },
+      { x: -11, y: 0, z: 0, w: 4, h: 0.8, d: 6, color: 0xb59a76, tag: 'crate' },
+      { x: 11, y: 0, z: 0, w: 4, h: 0.8, d: 6, color: 0xb59a76, tag: 'crate' },
+      { x: 0, y: 1.6, z: 0, w: 3.2, h: 5.5, d: 3.2, color: 0xc9972c, tag: 'wall' },
+
+      // Sanctuary Corner Pillars & Low Parapets
+      { x: -7.5, y: 1.6, z: -7.5, w: 2.2, h: 4.4, d: 2.2, color: 0x8c7355, tag: 'wall' },
+      { x: 7.5, y: 1.6, z: -7.5, w: 2.2, h: 4.4, d: 2.2, color: 0x8c7355, tag: 'wall' },
+      { x: -7.5, y: 1.6, z: 7.5, w: 2.2, h: 4.4, d: 2.2, color: 0x8c7355, tag: 'wall' },
+      { x: 7.5, y: 1.6, z: 7.5, w: 2.2, h: 4.4, d: 2.2, color: 0x8c7355, tag: 'wall' },
+
+      // Mid-Map Ruined Arch Walls & Stone Blocks
+      { x: -15, y: 0, z: -24, w: 8, h: 3.8, d: 2.0, color: 0x8f7758, tag: 'wall' },
+      { x: 15, y: 0, z: -24, w: 8, h: 3.8, d: 2.0, color: 0x8f7758, tag: 'wall' },
+      { x: -15, y: 0, z: 24, w: 8, h: 3.8, d: 2.0, color: 0x8f7758, tag: 'wall' },
+      { x: 15, y: 0, z: 24, w: 8, h: 3.8, d: 2.0, color: 0x8f7758, tag: 'wall' },
+
+      { x: 0, y: 0, z: -28, w: 7, h: 1.4, d: 1.5, color: 0xa68d6d, tag: 'barrier' },
+      { x: 0, y: 0, z: 28, w: 7, h: 1.4, d: 1.5, color: 0xa68d6d, tag: 'barrier' },
+
+      // Outer Colonnade Pillars (West & East Flanks)
+      { x: -28, y: 0, z: -18, w: 3.4, h: 5.5, d: 3.4, color: 0x997f5e, tag: 'wall' },
+      { x: -28, y: 0, z: 0, w: 3.4, h: 5.5, d: 3.4, color: 0x997f5e, tag: 'wall' },
+      { x: -28, y: 0, z: 18, w: 3.4, h: 5.5, d: 3.4, color: 0x997f5e, tag: 'wall' },
+      { x: -34, y: 0, z: -9, w: 5.5, h: 1.4, d: 1.5, color: 0xa68d6d, tag: 'barrier' },
+      { x: -34, y: 0, z: 9, w: 5.5, h: 1.4, d: 1.5, color: 0xa68d6d, tag: 'barrier' },
+
+      { x: 28, y: 0, z: -18, w: 3.4, h: 5.5, d: 3.4, color: 0x997f5e, tag: 'wall' },
+      { x: 28, y: 0, z: 0, w: 3.4, h: 5.5, d: 3.4, color: 0x997f5e, tag: 'wall' },
+      { x: 28, y: 0, z: 18, w: 3.4, h: 5.5, d: 3.4, color: 0x997f5e, tag: 'wall' },
+      { x: 34, y: 0, z: -9, w: 5.5, h: 1.4, d: 1.5, color: 0xa68d6d, tag: 'barrier' },
+      { x: 34, y: 0, z: 9, w: 5.5, h: 1.4, d: 1.5, color: 0xa68d6d, tag: 'barrier' }
+    ],
+    spawns: SPAWN_POINTS
+  },
+  SHIPYARD: {
+    id: 'SHIPYARD',
+    name: 'Cargo Dock',
+    desc: 'Night Container Port • Tight Alleys & Catwalks',
+    skyColor: 0x0b131e,
+    fogColor: 0x0b131e,
+    fogDensity: 0.0075,
+    floorBase: '#1b222c',
+    floorGrid: '#26303d',
+    roofBeams: false,
+    boxes: [
+      // Perimeter walls
+      { x: 0, y: 0, z: -58, w: 84, h: 9, d: 1.5, color: 0x3b424d, tag: 'wall' },
+      { x: 0, y: 0, z: 58, w: 84, h: 9, d: 1.5, color: 0x3b424d, tag: 'wall' },
+      { x: -42, y: 0, z: 0, w: 1.5, h: 9, d: 116, color: 0x3b424d, tag: 'wall' },
+      { x: 42, y: 0, z: 0, w: 1.5, h: 9, d: 116, color: 0x3b424d, tag: 'wall' },
+
+      // Spawn Container Shields
+      { x: 0, y: 0, z: -43, w: 16, h: 3.6, d: 3.6, color: 0x1e4e8c, tag: 'container' },
+      { x: -20, y: 0, z: -45, w: 9, h: 3.4, d: 3.2, color: 0x2b6cb0, tag: 'container' },
+      { x: 20, y: 0, z: -45, w: 9, h: 3.4, d: 3.2, color: 0x2b6cb0, tag: 'container' },
+
+      { x: 0, y: 0, z: 43, w: 16, h: 3.6, d: 3.6, color: 0x9b2c2c, tag: 'container' },
+      { x: -20, y: 0, z: 45, w: 9, h: 3.4, d: 3.2, color: 0xc53030, tag: 'container' },
+      { x: 20, y: 0, z: 45, w: 9, h: 3.4, d: 3.2, color: 0xc53030, tag: 'container' },
+
+      // Spawn Overlook Decks
+      { x: -32, y: 0, z: -51, w: 12, h: 2.2, d: 8, color: 0x4a5568, tag: 'deck' },
+      { x: -24, y: 0, z: -51, w: 4, h: 1.1, d: 4, color: 0x8b6b4a, tag: 'crate' },
+      { x: 32, y: 0, z: -51, w: 12, h: 2.2, d: 8, color: 0x4a5568, tag: 'deck' },
+      { x: 24, y: 0, z: -51, w: 4, h: 1.1, d: 4, color: 0x8b6b4a, tag: 'crate' },
+
+      { x: -32, y: 0, z: 51, w: 12, h: 2.2, d: 8, color: 0x4a5568, tag: 'deck' },
+      { x: -24, y: 0, z: 51, w: 4, h: 1.1, d: 4, color: 0x8b6b4a, tag: 'crate' },
+      { x: 32, y: 0, z: 51, w: 12, h: 2.2, d: 8, color: 0x4a5568, tag: 'deck' },
+      { x: 24, y: 0, z: 51, w: 4, h: 1.1, d: 4, color: 0x8b6b4a, tag: 'crate' },
+
+      // Center Elevated Cargo Loading Deck + Climb Crates
+      { x: 0, y: 0, z: 0, w: 26, h: 2.0, d: 8, color: 0x475569, tag: 'deck' },
+      { x: -15, y: 0, z: 0, w: 4, h: 1.0, d: 5, color: 0x9b7649, tag: 'crate' },
+      { x: 15, y: 0, z: 0, w: 4, h: 1.0, d: 5, color: 0x9b7649, tag: 'crate' },
+      { x: 0, y: 2.0, z: -3.2, w: 8, h: 1.3, d: 1.2, color: 0x7a8088, tag: 'barrier' },
+      { x: 0, y: 2.0, z: 3.2, w: 8, h: 1.3, d: 1.2, color: 0x7a8088, tag: 'barrier' },
+
+      // Double-Stacked Shipping Container Corridors
+      { x: -12, y: 0, z: -18, w: 4.5, h: 6.4, d: 13, color: 0xd97706, tag: 'container' },
+      { x: 12, y: 0, z: -18, w: 4.5, h: 6.4, d: 13, color: 0x2563eb, tag: 'container' },
+      { x: -12, y: 0, z: 18, w: 4.5, h: 6.4, d: 13, color: 0x2563eb, tag: 'container' },
+      { x: 12, y: 0, z: 18, w: 4.5, h: 6.4, d: 13, color: 0xd97706, tag: 'container' },
+
+      // Mid-Lane Cross Containers & Climbable Stacks
+      { x: 0, y: 0, z: -26, w: 10, h: 3.4, d: 4.2, color: 0x15803d, tag: 'container' },
+      { x: 0, y: 0, z: 26, w: 10, h: 3.4, d: 4.2, color: 0x15803d, tag: 'container' },
+      { x: -6.8, y: 0, z: -26, w: 3.2, h: 2.2, d: 3.2, color: 0x9b7649, tag: 'crate' },
+      { x: -6.8, y: 0, z: -23, w: 2.4, h: 1.1, d: 2.2, color: 0xab8556, tag: 'crate' },
+      { x: 6.8, y: 0, z: 26, w: 3.2, h: 2.2, d: 3.2, color: 0x9b7649, tag: 'crate' },
+      { x: 6.8, y: 0, z: 23, w: 2.4, h: 1.1, d: 2.2, color: 0xab8556, tag: 'crate' },
+
+      // Outer Flank Container Maze
+      { x: -28, y: 0, z: -12, w: 4.4, h: 3.4, d: 12, color: 0xb91c1c, tag: 'container' },
+      { x: -28, y: 0, z: 12, w: 4.4, h: 3.4, d: 12, color: 0x047857, tag: 'container' },
+      { x: -28, y: 0, z: -32, w: 8, h: 1.4, d: 1.5, color: 0x7a8088, tag: 'barrier' },
+      { x: -28, y: 0, z: 32, w: 8, h: 1.4, d: 1.5, color: 0x7a8088, tag: 'barrier' },
+
+      { x: 28, y: 0, z: -12, w: 4.4, h: 3.4, d: 12, color: 0x047857, tag: 'container' },
+      { x: 28, y: 0, z: 12, w: 4.4, h: 3.4, d: 12, color: 0xb91c1c, tag: 'container' },
+      { x: 28, y: 0, z: -32, w: 8, h: 1.4, d: 1.5, color: 0x7a8088, tag: 'barrier' },
+      { x: 28, y: 0, z: 32, w: 8, h: 1.4, d: 1.5, color: 0x7a8088, tag: 'barrier' }
+    ],
+    spawns: SPAWN_POINTS
+  }
+};
+
+export function getMap(mapId) {
+  return MAPS[mapId] || MAPS.WAREHOUSE;
+}
+
 export function rayBoxIntersect(origin, dir, box, maxDist = Infinity) {
   const minX = box.x - box.w / 2;
   const maxX = box.x + box.w / 2;
@@ -342,85 +508,117 @@ export const THROWABLES = {
     id: 'GRENADE',
     name: 'Frag Grenade',
     maxCount: 2,
-    fuseMs: 1800,
-    speed: 20,
-    upBoost: 3.4,
-    radius: 11.0,
-    maxDamage: 130
+    fuseMs: 1750,
+    speed: 19,
+    upBoost: 3.6,
+    radius: 12.5,
+    maxDamage: 165
   },
   FLASH: {
     id: 'FLASH',
     name: 'Flashbang',
     maxCount: 2,
-    fuseMs: 1350,
-    speed: 22,
-    upBoost: 2.8,
-    radius: 19.0,
-    maxDurationMs: 3200
+    fuseMs: 1300,
+    speed: 21,
+    upBoost: 3.0,
+    radius: 20.0,
+    maxDurationMs: 3400
   }
 };
 
 export function stepThrowablePhysics(proj, dt, boxes = MAP_BOXES) {
-  const r = 0.14;
-  proj.vy -= 22 * dt;
+  const r = 0.16;
+  const subSteps = 4;
+  const subDt = dt / subSteps;
+  const limX = ARENA.width / 2 - 0.95;
+  const limZ = ARENA.depth / 2 - 0.95;
 
-  // Move X/Z and bounce against walls/crates
-  const nextX = proj.x + proj.vx * dt;
-  const nextZ = proj.z + proj.vz * dt;
-  const limX = ARENA.width / 2 - 0.9;
-  const limZ = ARENA.depth / 2 - 0.9;
+  for (let s = 0; s < subSteps; s++) {
+    const prevX = proj.x;
+    const prevY = proj.y;
+    const prevZ = proj.z;
 
-  if (nextX < -limX || nextX > limX) {
-    proj.vx *= -0.6;
-  } else {
-    proj.x = nextX;
-  }
-  if (nextZ < -limZ || nextZ > limZ) {
-    proj.vz *= -0.6;
-  } else {
-    proj.z = nextZ;
-  }
+    proj.vy -= 21 * subDt;
+    proj.x += proj.vx * subDt;
+    proj.y += proj.vy * subDt;
+    proj.z += proj.vz * subDt;
 
-  const prevY = proj.y;
-  proj.y += proj.vy * dt;
+    if (proj.x < -limX) {
+      proj.x = -limX;
+      proj.vx = Math.abs(proj.vx) * 0.55;
+    } else if (proj.x > limX) {
+      proj.x = limX;
+      proj.vx = -Math.abs(proj.vx) * 0.55;
+    }
 
-  for (let i = 0; i < boxes.length; i++) {
-    const b = boxes[i];
-    const minX = b.x - b.w / 2 - r;
-    const maxX = b.x + b.w / 2 + r;
-    const minZ = b.z - b.d / 2 - r;
-    const maxZ = b.z + b.d / 2 + r;
-    const topY = b.y + b.h + r;
+    if (proj.z < -limZ) {
+      proj.z = -limZ;
+      proj.vz = Math.abs(proj.vz) * 0.55;
+    } else if (proj.z > limZ) {
+      proj.z = limZ;
+      proj.vz = -Math.abs(proj.vz) * 0.55;
+    }
 
-    if (proj.x >= minX && proj.x <= maxX && proj.z >= minZ && proj.z <= maxZ) {
-      if (prevY >= topY - 0.12 && proj.y <= topY && proj.vy < 0) {
-        proj.y = topY;
-        proj.vy = -proj.vy * 0.45;
-        proj.vx *= 0.76;
-        proj.vz *= 0.76;
-        continue;
-      }
-      if (proj.y < topY && proj.y > b.y) {
-        const dLeft = Math.abs(proj.x - minX);
-        const dRight = Math.abs(maxX - proj.x);
-        const dFront = Math.abs(proj.z - minZ);
-        const dBack = Math.abs(maxZ - proj.z);
-        const m = Math.min(dLeft, dRight, dFront, dBack);
-        if (m === dLeft || m === dRight) {
-          proj.vx *= -0.6;
-          proj.x = m === dLeft ? minX - 0.01 : maxX + 0.01;
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
+      const minX = b.x - b.w / 2 - r;
+      const maxX = b.x + b.w / 2 + r;
+      const minZ = b.z - b.d / 2 - r;
+      const maxZ = b.z + b.d / 2 + r;
+      const topY = b.y + b.h + r;
+
+      if (proj.x >= minX && proj.x <= maxX && proj.z >= minZ && proj.z <= maxZ && proj.y <= topY && proj.y >= b.y) {
+        // Crossed top surface downward (landed on crate / deck / container)
+        if (prevY >= topY - 0.08 && proj.vy <= 0) {
+          proj.y = topY;
+          proj.vy = Math.abs(proj.vy) > 1.1 ? -proj.vy * 0.42 : 0;
+          proj.vx *= Math.pow(0.75, 1 / subSteps);
+          proj.vz *= Math.pow(0.75, 1 / subSteps);
+          continue;
+        }
+
+        // Crossed side wall face from outside
+        if (prevX <= minX) {
+          proj.x = minX - 0.005;
+          proj.vx = -Math.abs(proj.vx) * 0.55;
+        } else if (prevX >= maxX) {
+          proj.x = maxX + 0.005;
+          proj.vx = Math.abs(proj.vx) * 0.55;
+        } else if (prevZ <= minZ) {
+          proj.z = minZ - 0.005;
+          proj.vz = -Math.abs(proj.vz) * 0.55;
+        } else if (prevZ >= maxZ) {
+          proj.z = maxZ + 0.005;
+          proj.vz = Math.abs(proj.vz) * 0.55;
         } else {
-          proj.vz *= -0.6;
-          proj.z = m === dFront ? minZ - 0.01 : maxZ + 0.01;
+          // Already inside box bounds -> push out nearest horizontal face
+          const dLeft = Math.abs(proj.x - minX);
+          const dRight = Math.abs(maxX - proj.x);
+          const dFront = Math.abs(proj.z - minZ);
+          const dBack = Math.abs(maxZ - proj.z);
+          const m = Math.min(dLeft, dRight, dFront, dBack);
+          if (m === dLeft) {
+            proj.x = minX - 0.01;
+            proj.vx = -Math.abs(proj.vx) * 0.55;
+          } else if (m === dRight) {
+            proj.x = maxX + 0.01;
+            proj.vx = Math.abs(proj.vx) * 0.55;
+          } else if (m === dFront) {
+            proj.z = minZ - 0.01;
+            proj.vz = -Math.abs(proj.vz) * 0.55;
+          } else {
+            proj.z = maxZ + 0.01;
+            proj.vz = Math.abs(proj.vz) * 0.55;
+          }
         }
       }
     }
-  }
 
-  if (proj.y <= r) {
-    proj.y = r;
-    proj.vy = Math.abs(proj.vy) > 1.2 ? -proj.vy * 0.45 : 0;
-    proj.vx *= 0.78;
-    proj.vz *= 0.78;
+    if (proj.y <= r) {
+      proj.y = r;
+      proj.vy = Math.abs(proj.vy) > 1.1 ? -proj.vy * 0.42 : 0;
+      proj.vx *= Math.pow(0.76, 1 / subSteps);
+      proj.vz *= Math.pow(0.76, 1 / subSteps);
+    }
   }
 }

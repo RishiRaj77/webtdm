@@ -8,8 +8,10 @@ import {
   ARENA,
   WEAPONS,
   THROWABLES,
+  MAPS,
   MAP_BOXES,
   SPAWN_POINTS,
+  getMap,
   rayBoxIntersect,
   raycastMap,
   resolvePlayerPhysics,
@@ -65,6 +67,7 @@ export function createGameServer() {
         list.push({
           code: r.code,
           mode: r.match.mode,
+          map: r.match.map,
           players: total,
           humans
         });
@@ -80,6 +83,7 @@ export function createGameServer() {
     const players = new Map();
     const match = {
       mode: 'TEAM', // 'TEAM' | 'FFA'
+      map: 'WAREHOUSE', // 'WAREHOUSE' | 'RUINS' | 'SHIPYARD'
       scores: { BLUE: 0, RED: 0 },
       targetScore: { TEAM: 40, FFA: 20 },
       matchDurationSec: 600,
@@ -101,12 +105,13 @@ export function createGameServer() {
     }
 
     function pickSpawn(player) {
+      const spawns = getMap(match.map).spawns;
       const pool =
         match.mode === 'FFA'
-          ? SPAWN_POINTS.FFA
+          ? spawns.FFA
           : player.team === 'BLUE'
-            ? SPAWN_POINTS.BLUE
-            : SPAWN_POINTS.RED;
+            ? spawns.BLUE
+            : spawns.RED;
 
       let best = pool[Math.floor(Math.random() * pool.length)];
       let bestScore = -1;
@@ -169,8 +174,9 @@ export function createGameServer() {
       }
     }
 
-    function resetMatch(newMode = match.mode) {
+    function resetMatch(newMode = match.mode, newMap = match.map) {
       match.mode = newMode === 'FFA' ? 'FFA' : 'TEAM';
+      if (newMap && MAPS[newMap]) match.map = newMap;
       match.scores = { BLUE: 0, RED: 0 };
       match.startedAt = Date.now();
       match.ended = false;
@@ -192,6 +198,7 @@ export function createGameServer() {
         type: 'match_reset',
         room: code,
         mode: match.mode,
+        map: match.map,
         scores: match.scores,
         targetScore: match.targetScore[match.mode]
       });
@@ -257,7 +264,7 @@ export function createGameServer() {
         shooter.reloadUntil = now + wep.reloadMs;
         return;
       }
-      if (now - shooter.lastShotAt < wep.fireRateMs * 0.82) return;
+      if (now - shooter.lastShotAt < wep.fireRateMs * 0.78) return;
 
       shooter.lastShotAt = now;
       shooter.ammo--;
@@ -280,6 +287,7 @@ export function createGameServer() {
       const spread = shooter.ads ? wep.adsSpread : wep.spread;
       const traceEnds = [];
       const hitAgg = new Map();
+      const mapBoxes = getMap(match.map).boxes;
 
       for (let i = 0; i < pellets; i++) {
         const sx = pellets > 1 ? (Math.random() - 0.5) * spread * 2 : 0;
@@ -291,7 +299,7 @@ export function createGameServer() {
         const rLen = Math.hypot(rx, ry, rz) || 1;
         const rayDir = { x: rx / rLen, y: ry / rLen, z: rz / rLen };
 
-        const mapHit = raycastMap(safeOrigin, rayDir, wep.range, MAP_BOXES);
+        const mapHit = raycastMap(safeOrigin, rayDir, wep.range, mapBoxes);
         let closestDist = mapHit ? mapHit.dist : wep.range;
         let hitTarget = null;
         let isHeadshot = false;
@@ -446,15 +454,18 @@ export function createGameServer() {
       const ny = dir.y / len;
       const nz = dir.z / len;
 
+      const nearWall = raycastMap({ x: ox, y: oy, z: oz }, { x: nx, y: ny, z: nz }, 0.65, MAP_BOXES);
+      const spawnDist = nearWall ? Math.max(0.05, nearWall.dist - 0.18) : 0.45;
+
       const proj = {
         id: `th_${nextId++}`,
         kind,
         ownerId: thrower.id,
         ownerName: thrower.name,
         ownerTeam: thrower.team,
-        x: ox + nx * 0.45,
-        y: Math.max(0.2, oy - 0.1),
-        z: oz + nz * 0.45,
+        x: ox + nx * spawnDist,
+        y: Math.max(0.22, oy - 0.08 + ny * spawnDist),
+        z: oz + nz * spawnDist,
         vx: nx * cfg.speed,
         vy: ny * cfg.speed + cfg.upBoost,
         vz: nz * cfg.speed,
@@ -488,7 +499,7 @@ export function createGameServer() {
         z: +proj.z.toFixed(2)
       });
 
-      const blastOrigin = { x: proj.x, y: proj.y + 0.25, z: proj.z };
+      const blastOrigin = { x: proj.x, y: proj.y + 0.45, z: proj.z };
       const owner = players.get(proj.ownerId);
 
       if (proj.kind === 'GRENADE') {
@@ -509,11 +520,20 @@ export function createGameServer() {
           const dist = Math.hypot(tx, ty, tz);
           if (dist > cfg.radius) continue;
 
-          const dir = { x: tx / (dist || 1), y: ty / (dist || 1), z: tz / (dist || 1) };
-          const wall = raycastMap(blastOrigin, dir, dist, MAP_BOXES);
-          const wallFactor = wall && wall.dist < dist - 0.35 ? 0.3 : 1.0;
+          const dirChest = { x: tx / (dist || 1), y: ty / (dist || 1), z: tz / (dist || 1) };
+          const wallChest = raycastMap(blastOrigin, dirChest, dist, MAP_BOXES);
+          const headY = target.y + 1.48 - blastOrigin.y;
+          const distHead = Math.hypot(tx, headY, tz) || 1;
+          const dirHead = { x: tx / distHead, y: headY / distHead, z: tz / distHead };
+          const wallHead = raycastMap(blastOrigin, dirHead, distHead, MAP_BOXES);
 
-          const dmg = Math.round(cfg.maxDamage * (1 - dist / cfg.radius) * wallFactor);
+          const clearLos =
+            (!wallChest || wallChest.dist >= dist - 0.35) ||
+            (!wallHead || wallHead.dist >= distHead - 0.35);
+          const wallFactor = clearLos ? 1.0 : 0.35;
+
+          const falloff = dist <= 3.5 ? 1.0 : Math.max(0.15, 1 - (dist - 3.5) / (cfg.radius - 3.5));
+          const dmg = Math.round(cfg.maxDamage * falloff * wallFactor);
           if (dmg <= 0) continue;
 
           target.hp = Math.max(0, target.hp - dmg);
@@ -925,7 +945,10 @@ export function createGameServer() {
     }
 
     const ext = path.extname(safePath).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
+      'Cache-Control': 'no-store, no-cache, must-revalidate'
+    });
     fs.createReadStream(safePath).pipe(res);
   });
 

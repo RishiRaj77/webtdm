@@ -526,33 +526,57 @@ const activeExplosions = [];
 
 function spawnThrowableMesh(msg) {
   const group = new THREE.Group();
-  if (msg.kind === 'GRENADE') {
+  const isFrag = msg.kind === 'GRENADE';
+  if (isFrag) {
     const body = new THREE.Mesh(
-      new THREE.SphereGeometry(0.13, 12, 12),
-      new THREE.MeshStandardMaterial({ color: 0x3b5323, roughness: 0.5, metalness: 0.4 })
-    );
-    const ring = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.06, 0.28, 8),
-      new THREE.MeshBasicMaterial({ color: 0xef4444 })
-    );
-    group.add(body, ring);
-  } else {
-    const body = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.09, 0.09, 0.26, 12),
-      new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.3, metalness: 0.8 })
+      new THREE.SphereGeometry(0.18, 14, 14),
+      new THREE.MeshStandardMaterial({ color: 0x3f6212, roughness: 0.4, metalness: 0.35 })
     );
     const band = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.095, 0.095, 0.08, 12),
+      new THREE.CylinderGeometry(0.185, 0.185, 0.08, 12),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+    );
+    const beacon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.09, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0xff3300 })
+    );
+    beacon.position.y = 0.2;
+    group.add(body, band, beacon);
+  } else {
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.12, 0.34, 14),
+      new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.25, metalness: 0.75 })
+    );
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.13, 0.13, 0.1, 14),
       new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
     );
-    group.add(body, band);
+    const beacon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.08, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0x00ffff })
+    );
+    beacon.position.y = 0.2;
+    group.add(body, band, beacon);
   }
   group.position.set(msg.x, msg.y, msg.z);
   scene.add(group);
+
+  const trailPts = [new THREE.Vector3(msg.x, msg.y, msg.z), new THREE.Vector3(msg.x, msg.y, msg.z)];
+  const trailGeo = new THREE.BufferGeometry().setFromPoints(trailPts);
+  const trailMat = new THREE.LineBasicMaterial({
+    color: isFrag ? 0xff6b00 : 0x38bdf8,
+    transparent: true,
+    opacity: 0.75
+  });
+  const trailLine = new THREE.Line(trailGeo, trailMat);
+  scene.add(trailLine);
+
   activeThrowables.set(msg.id, {
     id: msg.id,
     kind: msg.kind,
     mesh: group,
+    trailLine,
+    trailPts: [new THREE.Vector3(msg.x, msg.y, msg.z)],
     x: msg.x,
     y: msg.y,
     z: msg.z,
@@ -560,28 +584,59 @@ function spawnThrowableMesh(msg) {
     vy: msg.vy,
     vz: msg.vz,
     born: performance.now(),
-    fuseMs: msg.fuseMs || 1800
+    fuseMs: msg.fuseMs || 1750
   });
 }
 
 function spawnExplosionEffect(kind, x, y, z) {
   const isFrag = kind === 'GRENADE';
-  const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 18, 18),
+  const group = new THREE.Group();
+  group.position.set(x, y + 0.3, z);
+
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(0.85, 16, 16),
     new THREE.MeshBasicMaterial({
-      color: isFrag ? 0xff5500 : 0xffffff,
+      color: isFrag ? 0xfffbeb : 0xffffff,
       transparent: true,
-      opacity: 0.92
+      opacity: 1.0
     })
   );
-  sphere.position.set(x, y + 0.25, z);
-  scene.add(sphere);
+  const outer = new THREE.Mesh(
+    new THREE.SphereGeometry(1.15, 18, 18),
+    new THREE.MeshBasicMaterial({
+      color: isFrag ? 0xff4500 : 0x7dd3fc,
+      transparent: true,
+      opacity: 0.88
+    })
+  );
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.5, 1.25, 24),
+    new THREE.MeshBasicMaterial({
+      color: isFrag ? 0xfbbf24 : 0xffffff,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.9
+    })
+  );
+  ring.rotation.x = Math.PI / 2;
+  group.add(core, outer, ring);
+  scene.add(group);
+
   activeExplosions.push({
-    mesh: sphere,
-    maxScale: isFrag ? 6.5 : 8.5,
+    mesh: group,
+    core,
+    outer,
+    ring,
+    maxScale: isFrag ? 6.8 : 8.5,
     born: performance.now(),
-    ttl: isFrag ? 340 : 240
+    ttl: isFrag ? 520 : 360
   });
+
+  // Apply distance-based camera shake
+  const dist = Math.hypot(x - myState.x, z - myState.z);
+  if (dist < 22) {
+    myState.shakeAmt = Math.max(myState.shakeAmt || 0, (1 - dist / 22) * (isFrag ? 0.32 : 0.14));
+  }
 }
 
 function spawnBulletTracer(start, end, isEnemyHit) {
@@ -944,8 +999,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyC') myState.crouch = !myState.crouch;
   if (e.code === 'KeyV') setCameraPerspective(!myState.tpp);
   if (e.code === 'KeyR') triggerReload();
-  if (e.code === 'KeyG') tryThrow('GRENADE');
-  if (e.code === 'KeyF') tryThrow('FLASH');
+  if (e.code === 'KeyG' || e.code === 'Digit4') tryThrow('GRENADE');
+  if (e.code === 'KeyF' || e.code === 'Digit5') tryThrow('FLASH');
   if (e.code === 'Digit1') selectWeapon('M416');
   if (e.code === 'Digit2') selectWeapon('AKM');
   if (e.code === 'Digit3') selectWeapon('AWM');
@@ -1089,18 +1144,37 @@ function tryThrow(kind) {
   if (!pointerLocked || myState.dead) return;
   const now = performance.now();
   if (now - myState.lastThrowAt < 450) return;
-  if (kind === 'GRENADE' && myState.grenades <= 0) return;
-  if (kind === 'FLASH' && myState.flashes <= 0) return;
+  if (kind === 'GRENADE' && myState.grenades <= 0) {
+    showCenterBanner('NO FRAG GRENADES LEFT', 900);
+    return;
+  }
+  if (kind === 'FLASH' && myState.flashes <= 0) {
+    showCenterBanner('NO FLASHBANGS LEFT', 900);
+    return;
+  }
 
+  sfx.init();
   myState.lastThrowAt = now;
+  myState.throwAnimUntil = now + 260;
   if (kind === 'GRENADE') myState.grenades = Math.max(0, myState.grenades - 1);
   else myState.flashes = Math.max(0, myState.flashes - 1);
   updateBottomHud();
+
+  const pillEl = document.getElementById(kind === 'GRENADE' ? 'nade-pill' : 'flash-pill');
+  if (pillEl) {
+    pillEl.classList.add('active');
+    setTimeout(() => pillEl.classList.remove('active'), 320);
+  }
 
   const dir = new THREE.Vector3(0, 0, -1)
     .applyEuler(new THREE.Euler(myState.pitch, myState.yaw, 0, 'YXZ'))
     .normalize();
   const eyeY = myState.y + (myState.crouch ? ARENA.crouchEye : ARENA.standEye);
+
+  // If WebSocket died mid-session, ensure local fallback takes over immediately
+  if (!localFallback && (!ws || ws.readyState !== WebSocket.OPEN)) {
+    startLocalFallback();
+  }
 
   sendWs({
     type: 'throw',
@@ -1111,7 +1185,7 @@ function tryThrow(kind) {
 }
 
 // --- WEBSOCKET CONNECTION (+ CLOUDFLARE TUNNEL BRIDGE FOR NETLIFY) ---
-const ACTIVE_TUNNEL_HOST = 'executives-firms-subsidiary-performs.trycloudflare.com';
+const ACTIVE_TUNNEL_HOST = 'friday-socket-certain-herb.trycloudflare.com';
 const customServer = urlParams.get('server');
 const isStaticNetlify = window.location.hostname.endsWith('.netlify.app');
 const targetWsHost = customServer || (isStaticNetlify ? ACTIVE_TUNNEL_HOST : window.location.host);
@@ -1274,8 +1348,10 @@ function handleServerMessage(msg) {
         myState.invuln = p.invuln;
         myState.reloading = p.reloading;
         if (!myState.firing && !myState.dead) myState.ammo = p.ammo;
-        if (typeof p.grenades === 'number') myState.grenades = p.grenades;
-        if (typeof p.flashes === 'number') myState.flashes = p.flashes;
+        if (performance.now() - myState.lastThrowAt > 650) {
+          if (typeof p.grenades === 'number') myState.grenades = p.grenades;
+          if (typeof p.flashes === 'number') myState.flashes = p.flashes;
+        }
         updateBottomHud();
         continue;
       }
@@ -1360,6 +1436,11 @@ function handleServerMessage(msg) {
     const th = activeThrowables.get(msg.id);
     if (th) {
       scene.remove(th.mesh);
+      if (th.trailLine) {
+        scene.remove(th.trailLine);
+        th.trailLine.geometry.dispose();
+        th.trailLine.material.dispose();
+      }
       activeThrowables.delete(msg.id);
     }
     spawnExplosionEffect(msg.kind, msg.x, msg.y, msg.z);
@@ -1748,7 +1829,7 @@ function startLocalFallback() {
 if (ws) {
   ws.addEventListener('message', (ev) => handleServerMessage(JSON.parse(ev.data)));
   ws.addEventListener('error', () => startLocalFallback());
-  ws.addEventListener('close', () => { if (!myState.id) startLocalFallback(); });
+  ws.addEventListener('close', () => startLocalFallback());
 } else {
   startLocalFallback();
 }
@@ -1935,21 +2016,28 @@ function animate(now) {
     }
     fpGunGroup.visible = !showTpp && !(myState.ads && wep.sniper && !myState.reloading);
 
-    // First-person gun ADS + steady Recoil + Reload animation
+    // First-person gun ADS + steady Recoil + Reload + Throw animation
     myState.recoilKick = THREE.MathUtils.lerp(myState.recoilKick, 0, dt * 28);
+    const throwing = now < (myState.throwAnimUntil || 0);
     const gunBobX = isMoving && !myState.ads ? Math.cos(bobPhase * 0.5) * 0.006 : 0;
     const gunBobY = isMoving && !myState.ads ? Math.abs(Math.sin(bobPhase)) * -0.006 : 0;
     const targetGunX = (myState.ads ? 0.0 : 0.22) + gunBobX;
-    const targetGunY = (myState.reloading ? -0.34 : myState.ads ? -0.091 : -0.2) + gunBobY;
+    const targetGunY = (throwing ? -0.38 : myState.reloading ? -0.34 : myState.ads ? -0.091 : -0.2) + gunBobY;
     const targetGunZ = (myState.ads ? -0.32 : -0.4) + myState.recoilKick;
 
-    camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, 0, dt * 12);
+    if (myState.shakeAmt > 0.002) {
+      camera.rotation.z = (Math.random() - 0.5) * myState.shakeAmt * 0.14;
+      camera.position.y += (Math.random() - 0.5) * myState.shakeAmt * 0.22;
+      myState.shakeAmt = Math.max(0, myState.shakeAmt - dt * 1.4);
+    } else {
+      camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, 0, dt * 12);
+    }
     localAvatar.group.rotation.x = 0;
 
     fpGunGroup.position.x = THREE.MathUtils.lerp(fpGunGroup.position.x, targetGunX, dt * 20);
     fpGunGroup.position.y = THREE.MathUtils.lerp(fpGunGroup.position.y, targetGunY, dt * 18);
     fpGunGroup.position.z = THREE.MathUtils.lerp(fpGunGroup.position.z, targetGunZ, dt * 26);
-    fpGunGroup.rotation.x = myState.reloading ? 0.42 : myState.ads ? 0 : myState.recoilKick * 0.25;
+    fpGunGroup.rotation.x = throwing ? -0.35 : myState.reloading ? 0.42 : myState.ads ? 0 : myState.recoilKick * 0.25;
   } else {
     // Death-cam & 3s respawn countdown feedback
     fpGunGroup.visible = false;
@@ -2046,27 +2134,42 @@ function animate(now) {
   }
 
   // Step active grenades & flashbangs in 3D space
-  for (const th of activeThrowables.values()) {
+  for (const [id, th] of activeThrowables.entries()) {
+    if (now - th.born > th.fuseMs + 600) {
+      scene.remove(th.mesh);
+      if (th.trailLine) {
+        scene.remove(th.trailLine);
+        th.trailLine.geometry.dispose();
+        th.trailLine.material.dispose();
+      }
+      activeThrowables.delete(id);
+      continue;
+    }
     stepThrowablePhysics(th, dt, MAP_BOXES);
     th.mesh.position.set(th.x, th.y, th.z);
-    th.mesh.rotation.x += dt * 9;
-    th.mesh.rotation.z += dt * 6;
+    th.mesh.rotation.x += dt * 11;
+    th.mesh.rotation.z += dt * 7;
+    if (th.trailLine && th.trailPts) {
+      th.trailPts.push(new THREE.Vector3(th.x, th.y, th.z));
+      if (th.trailPts.length > 16) th.trailPts.shift();
+      th.trailLine.geometry.setFromPoints(th.trailPts);
+    }
   }
 
-  // Update explosion spheres
+  // Update explosion spheres & shockwave rings
   for (let i = activeExplosions.length - 1; i >= 0; i--) {
     const ex = activeExplosions[i];
     const age = now - ex.born;
     if (age >= ex.ttl) {
       scene.remove(ex.mesh);
-      ex.mesh.geometry.dispose();
-      ex.mesh.material.dispose();
       activeExplosions.splice(i, 1);
     } else {
       const t = age / ex.ttl;
-      const sc = 0.4 + t * ex.maxScale;
+      const sc = 0.5 + t * ex.maxScale;
       ex.mesh.scale.set(sc, sc, sc);
-      ex.mesh.material.opacity = 0.85 * (1 - t);
+      if (ex.core) ex.core.material.opacity = Math.max(0, 1 - t * 1.4);
+      if (ex.outer) ex.outer.material.opacity = 0.9 * (1 - t);
+      if (ex.ring) ex.ring.material.opacity = 0.95 * (1 - t);
     }
   }
 
