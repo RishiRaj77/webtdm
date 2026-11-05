@@ -6,6 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "tunnel": "cloudflared.exe tunnel --url http://localhost:3000",
     "build": "node -e \"import('node:fs').then(fs=>{fs.mkdirSync('public/vendor',{recursive:true});fs.copyFileSync('node_modules/three/build/three.module.js','public/vendor/three.module.js');fs.copyFileSync('node_modules/three/build/three.core.js','public/vendor/three.core.js');})\"",
     "test": "node test.js"
   },

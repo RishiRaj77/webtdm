@@ -266,16 +266,31 @@ function rebuildFpGun(weaponId) {
   mag.rotation.x = 0.22;
   fpGunGroup.add(mag);
 
-  // Sight / Scope
+  // Sight / Scope (8x Sniper Scope for AWM, 3D Red Dot Sight for M416 & AKM)
   if (wep.sniper) {
     const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.28, 12), darkMat);
     scope.rotation.x = Math.PI / 2;
     scope.position.set(0, 0.095, -0.04);
     fpGunGroup.add(scope);
   } else {
-    const holo = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.08), darkMat);
-    holo.position.set(0, 0.08, -0.02);
-    fpGunGroup.add(holo);
+    const rdsBase = new THREE.Mesh(new THREE.BoxGeometry(0.056, 0.016, 0.09), darkMat);
+    rdsBase.position.set(0, 0.062, -0.02);
+    fpGunGroup.add(rdsBase);
+
+    const rdsLeft = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.042, 0.04), darkMat);
+    rdsLeft.position.set(-0.024, 0.09, -0.02);
+    const rdsRight = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.042, 0.04), darkMat);
+    rdsRight.position.set(0.024, 0.09, -0.02);
+    const rdsTop = new THREE.Mesh(new THREE.BoxGeometry(0.054, 0.006, 0.04), darkMat);
+    rdsTop.position.set(0, 0.112, -0.02);
+    fpGunGroup.add(rdsLeft, rdsRight, rdsTop);
+
+    const rdsDot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.0032, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff1e1e })
+    );
+    rdsDot.position.set(0, 0.091, -0.02);
+    fpGunGroup.add(rdsDot);
   }
 
   // Muzzle flash
@@ -466,10 +481,18 @@ const myState = {
   grounded: true,
   crouch: false,
   ads: false,
+  tpp: false,
   firing: false,
   lastClientShotAt: 0,
   recoilKick: 0
 };
+
+// Local player's 3D character mesh for TPP (3rd-Person Perspective)
+const localAvatar = createSoldierAvatar(0x3b82f6);
+localAvatar.group.visible = false;
+// Hide floating overhead name sprite on own character
+const ownBadge = localAvatar.group.children[localAvatar.group.children.length - 1];
+if (ownBadge) ownBadge.visible = false;
 
 function cleanRoomCode(raw) {
   const s = String(raw || '').toUpperCase().replace(/[^A-Z0-9\-]/g, '').slice(0, 12);
@@ -608,6 +631,18 @@ setupSegmented('wep-select', 'data-wep', (wep) => {
   selectWeapon(wep);
 });
 
+function setCameraPerspective(isTpp) {
+  myState.tpp = Boolean(isTpp);
+  document.querySelectorAll('#cam-select .seg-btn').forEach((el) => {
+    el.classList.toggle('active', el.getAttribute('data-cam') === (myState.tpp ? 'TPP' : 'FPP'));
+  });
+  showCenterBanner(myState.tpp ? 'CAMERA: TPP (3RD PERSON)' : 'CAMERA: FPP (1ST PERSON)', 1200);
+}
+
+setupSegmented('cam-select', 'data-cam', (cam) => {
+  setCameraPerspective(cam === 'TPP');
+});
+
 addBotBtn.addEventListener('click', () => sendWs({ type: 'bot', action: 'add' }));
 remBotBtn.addEventListener('click', () => sendWs({ type: 'bot', action: 'remove' }));
 
@@ -661,11 +696,11 @@ window.addEventListener('keydown', (e) => {
   if (!pointerLocked) return;
 
   if (e.code === 'KeyC') myState.crouch = !myState.crouch;
+  if (e.code === 'KeyV') setCameraPerspective(!myState.tpp);
   if (e.code === 'KeyR') triggerReload();
   if (e.code === 'Digit1') selectWeapon('M416');
   if (e.code === 'Digit2') selectWeapon('AKM');
   if (e.code === 'Digit3') selectWeapon('AWM');
-  if (e.code === 'Digit4') selectWeapon('S12K');
 });
 
 window.addEventListener('keyup', (e) => {
@@ -790,11 +825,11 @@ function tryShoot() {
     dir: { x: dir.x, y: dir.y, z: dir.z }
   });
 
-  // Apply recoil kick
-  const mult = myState.ads ? 0.65 : 1.0;
+  // Apply smooth, minimal recoil kick
+  const mult = myState.ads ? 0.45 : 0.85;
   myState.pitch = Math.min(1.48, myState.pitch + wep.recoilPitch * mult);
   myState.yaw += (Math.random() - 0.5) * wep.recoilYaw * 2 * mult;
-  myState.recoilKick = 0.085;
+  myState.recoilKick = myState.ads ? 0.01 : 0.022;
 
   if (muzzleFlashMesh) {
     muzzleFlashMesh.material.opacity = 0.95;
@@ -802,13 +837,17 @@ function tryShoot() {
   }
 }
 
-// --- WEBSOCKET CONNECTION (+ STATIC HOST / NETLIFY P2P ROOM FALLBACK) ---
-const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+// --- WEBSOCKET CONNECTION (+ CLOUDFLARE TUNNEL BRIDGE FOR NETLIFY) ---
+const ACTIVE_TUNNEL_HOST = 'executives-firms-subsidiary-performs.trycloudflare.com';
+const customServer = urlParams.get('server');
+const isStaticNetlify = window.location.hostname.endsWith('.netlify.app');
+const targetWsHost = customServer || (isStaticNetlify ? ACTIVE_TUNNEL_HOST : window.location.host);
+const wsProto = targetWsHost === window.location.host && window.location.protocol === 'http:' ? 'ws:' : 'wss:';
 let ws = null;
 let localFallback = null;
 
 try {
-  ws = new WebSocket(`${wsProto}//${window.location.host}/?room=${encodeURIComponent(currentRoom)}`);
+  ws = new WebSocket(`${wsProto}//${targetWsHost}/?room=${encodeURIComponent(currentRoom)}`);
 } catch {
   ws = null;
 }
@@ -838,7 +877,9 @@ function handleServerMessage(msg) {
     if (msg.rooms) renderRoomList(msg.rooms);
     currentMode = msg.mode;
     targetScore = msg.targetScore;
-    if (msg.lanUrls && msg.lanUrls.length) {
+    const isLocalHost =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (isLocalHost && msg.lanUrls && msg.lanUrls.length) {
       baseLanOrigin = msg.lanUrls[0];
     } else {
       baseLanOrigin = window.location.origin;
@@ -1025,7 +1066,7 @@ function startLocalFallback() {
     const id = `bot_${botSeq++}`;
     const names = ['Bot_Viper', 'Bot_Ghost', 'Bot_Falcon', 'Bot_Reaper', 'Bot_Titan', 'Bot_Cobra'];
     const team = botSeq % 2 === 0 ? 'BLUE' : 'RED';
-    const wep = ['M416', 'AKM', 'S12K', 'AWM'][botSeq % 4];
+    const wep = ['M416', 'AKM', 'AWM'][botSeq % 3];
     const sp = pickSpawn(team);
     players.set(id, {
       id, name: names[(botSeq - 2) % names.length], team, isBot: true,
@@ -1371,48 +1412,101 @@ function animate(now) {
 
     resolvePlayerPhysics(myState, dt, MAP_BOXES);
 
-    // Smooth camera height + head bob
+    // Smooth camera height + subtle head bob (FPP vs TPP)
     const targetEye = myState.crouch ? ARENA.crouchEye : ARENA.standEye;
     const isMoving = len > 0 && myState.grounded;
-    if (isMoving) bobPhase += dt * (keys['ShiftLeft'] ? 13 : 9);
-    const bobOffset = isMoving ? Math.sin(bobPhase) * (myState.ads ? 0.012 : 0.038) : 0;
+    if (isMoving) bobPhase += dt * (keys['ShiftLeft'] ? 11 : 7.5);
+    const bobOffset = isMoving ? Math.sin(bobPhase) * (myState.ads ? 0.002 : 0.014) : 0;
 
-    camera.position.x = myState.x;
-    camera.position.z = myState.z;
-    camera.position.y = THREE.MathUtils.lerp(
-      camera.position.y,
-      myState.y + targetEye + bobOffset,
-      dt * 16
-    );
     camera.rotation.order = 'YXZ';
     camera.rotation.y = myState.yaw;
     camera.rotation.x = myState.pitch;
 
-    // FOV & Scope handling
+    const showTpp = myState.tpp && !myState.ads;
+    localAvatar.group.visible = showTpp && !myState.dead;
+
+    if (showTpp) {
+      // Update own 3rd-person soldier model
+      const myCol = myState.team === 'BLUE' ? 0x3b82f6 : 0xef4444;
+      localAvatar.chestBand.material.color.setHex(myCol);
+      localAvatar.helmet.material.color.setHex(myCol);
+      localAvatar.shieldRing.visible = Boolean(myState.invuln);
+      localAvatar.group.position.set(myState.x, myState.y, myState.z);
+      localAvatar.group.rotation.y = myState.yaw;
+      localAvatar.armGroup.rotation.x = myState.pitch;
+      localAvatar.group.scale.y = THREE.MathUtils.lerp(
+        localAvatar.group.scale.y,
+        myState.crouch ? 0.68 : 1.0,
+        dt * 14
+      );
+      if (len > 0) {
+        localAvatar.walkPhase += dt * (keys['ShiftLeft'] ? 16 : 12);
+        localAvatar.leftLeg.rotation.x = Math.sin(localAvatar.walkPhase) * 0.55;
+        localAvatar.rightLeg.rotation.x = -Math.sin(localAvatar.walkPhase) * 0.55;
+      } else {
+        localAvatar.leftLeg.rotation.x = THREE.MathUtils.lerp(localAvatar.leftLeg.rotation.x, 0, dt * 10);
+        localAvatar.rightLeg.rotation.x = THREE.MathUtils.lerp(localAvatar.rightLeg.rotation.x, 0, dt * 10);
+      }
+
+      // Over-the-right-shoulder TPP camera with wall collision check
+      const pivot = {
+        x: myState.x + cos * 0.48,
+        y: myState.y + targetEye + 0.22,
+        z: myState.z - sin * 0.48
+      };
+      const camBack = {
+        x: sin * Math.cos(myState.pitch),
+        y: -Math.sin(myState.pitch),
+        z: cos * Math.cos(myState.pitch)
+      };
+      const maxTppDist = 3.1;
+      const wallHit = raycastMap(pivot, camBack, maxTppDist, MAP_BOXES);
+      const safeDist = wallHit ? Math.max(0.45, wallHit.dist - 0.25) : maxTppDist;
+
+      camera.position.set(
+        pivot.x + camBack.x * safeDist,
+        pivot.y + camBack.y * safeDist,
+        pivot.z + camBack.z * safeDist
+      );
+    } else {
+      camera.position.x = myState.x;
+      camera.position.z = myState.z;
+      camera.position.y = THREE.MathUtils.lerp(
+        camera.position.y,
+        myState.y + targetEye + bobOffset,
+        dt * 16
+      );
+    }
+
+    // FOV & Red Dot Sight ADS handling
     const targetFov = myState.ads ? wep.adsFov : 75;
     camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, dt * 16);
     camera.updateProjectionMatrix();
 
-    if (myState.ads && wep.sniper && pointerLocked) {
+    if (myState.ads && pointerLocked && !myState.reloading) {
+      sniperScopeEl.classList.toggle('sniper-mode', Boolean(wep.sniper));
       sniperScopeEl.style.display = 'block';
       crosshairEl.style.display = 'none';
-      fpGunGroup.visible = false;
     } else {
       sniperScopeEl.style.display = 'none';
       crosshairEl.style.display = 'block';
-      fpGunGroup.visible = true;
     }
+    fpGunGroup.visible = !showTpp && !(myState.ads && wep.sniper && !myState.reloading);
 
-    // First-person gun ADS + Recoil + Reload animation
-    myState.recoilKick = THREE.MathUtils.lerp(myState.recoilKick, 0, dt * 18);
-    const targetGunX = myState.ads ? 0.0 : 0.24;
-    const targetGunY = myState.reloading ? -0.36 : myState.ads ? -0.145 : -0.22;
-    const targetGunZ = -0.42 + myState.recoilKick;
+    // First-person gun ADS + steady Recoil + Reload animation
+    myState.recoilKick = THREE.MathUtils.lerp(myState.recoilKick, 0, dt * 28);
+    const gunBobX = isMoving && !myState.ads ? Math.cos(bobPhase * 0.5) * 0.006 : 0;
+    const gunBobY = isMoving && !myState.ads ? Math.abs(Math.sin(bobPhase)) * -0.006 : 0;
+    const targetGunX = (myState.ads ? 0.0 : 0.22) + gunBobX;
+    const targetGunY = (myState.reloading ? -0.34 : myState.ads ? -0.091 : -0.2) + gunBobY;
+    const targetGunZ = (myState.ads ? -0.32 : -0.4) + myState.recoilKick;
 
-    fpGunGroup.position.x = THREE.MathUtils.lerp(fpGunGroup.position.x, targetGunX, dt * 16);
-    fpGunGroup.position.y = THREE.MathUtils.lerp(fpGunGroup.position.y, targetGunY, dt * 14);
-    fpGunGroup.position.z = THREE.MathUtils.lerp(fpGunGroup.position.z, targetGunZ, dt * 20);
-    fpGunGroup.rotation.x = myState.reloading ? 0.45 : myState.recoilKick * 1.4;
+    fpGunGroup.position.x = THREE.MathUtils.lerp(fpGunGroup.position.x, targetGunX, dt * 20);
+    fpGunGroup.position.y = THREE.MathUtils.lerp(fpGunGroup.position.y, targetGunY, dt * 18);
+    fpGunGroup.position.z = THREE.MathUtils.lerp(fpGunGroup.position.z, targetGunZ, dt * 26);
+    fpGunGroup.rotation.x = myState.reloading ? 0.42 : myState.ads ? 0 : myState.recoilKick * 0.25;
+  } else {
+    localAvatar.group.visible = false;
   }
 
   if (muzzleFlashMesh && muzzleFlashMesh.material.opacity > 0) {

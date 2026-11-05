@@ -47,7 +47,7 @@ const c1 = await connectClient();
 const c2 = await connectClient();
 assert.equal(players.size, 2);
 
-// Join as BLUE and RED in TEAM mode with AWM sniper
+// Join as BLUE and RED in TEAM mode with AWM sniper (55 body / 110 head)
 c1.ws.send(JSON.stringify({ type: 'join', name: 'Rishi', team: 'BLUE', weapon: 'AWM', mode: 'TEAM' }));
 c2.ws.send(JSON.stringify({ type: 'join', name: 'Colleague', team: 'RED', weapon: 'M416' }));
 
@@ -62,7 +62,34 @@ assert.equal(p2.team, 'RED');
 p1.x = -37; p1.y = 0; p1.z = -5; p1.invulnUntil = 0;
 p2.x = -37; p2.y = 0; p2.z = 5;  p2.invulnUntil = 0;
 
-// c1 shoots c2 in the head with AWM (105 * 2.5 = 263 dmg -> instant kill)
+// 1) AWM body shot (y = 0.8) should deal 55 dmg -> target survives at 45 HP
+c1.ws.send(
+  JSON.stringify({
+    type: 'shoot',
+    origin: { x: -37, y: 0.8, z: -5 },
+    dir: { x: 0, y: 0, z: 1 }
+  })
+);
+await new Promise((r) => setTimeout(r, 60));
+assert.equal(p2.hp, 45, '1st AWM body shot should leave target at 45 HP');
+assert.equal(p2.dead, false, 'Target should survive 1st AWM body shot');
+
+// Reset cooldown and fire 2nd AWM body shot -> eliminates target
+p1.lastShotAt = 0;
+c1.ws.send(
+  JSON.stringify({
+    type: 'shoot',
+    origin: { x: -37, y: 0.8, z: -5 },
+    dir: { x: 0, y: 0, z: 1 }
+  })
+);
+await new Promise((r) => setTimeout(r, 60));
+assert.equal(p2.dead, true, '2nd AWM body shot should eliminate target');
+assert.equal(p1.kills, 1, 'Shooter should have 1 kill after 2 body shots');
+
+// 2) Respawn target at full 100 HP and verify 1 AWM headshot (y = 1.5 -> 110 dmg) is an instant 1-shot kill
+p2.dead = false; p2.hp = 100; p2.invulnUntil = 0;
+p1.lastShotAt = 0;
 c1.ws.send(
   JSON.stringify({
     type: 'shoot',
@@ -72,9 +99,9 @@ c1.ws.send(
 );
 
 await new Promise((r) => setTimeout(r, 60));
-assert.equal(p1.kills, 1, 'Shooter should be credited with 1 kill');
-assert.equal(match.scores.BLUE, 1, 'Blue team score should increment');
-assert.equal(p2.dead, true, 'Target should be eliminated');
+assert.equal(p1.kills, 2, 'Shooter should be credited with 2nd kill after headshot');
+assert.equal(match.scores.BLUE, 2, 'Blue team score should be 2');
+assert.equal(p2.dead, true, 'Target should be eliminated in 1 headshot');
 
 // Switch to FFA mode and test bots
 c1.ws.send(JSON.stringify({ type: 'set_mode', mode: 'FFA' }));

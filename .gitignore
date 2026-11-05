@@ -1,6 +1,7 @@
 node_modules/
 graphify-out/
 public/vendor/
+cloudflared.exe
 .DS_Store
 *.log
 

@@ -401,7 +401,7 @@ export function createGameServer() {
         'Bot_Cobra'
       ];
       const team = pickTeam();
-      const wepKeys = ['M416', 'AKM', 'S12K', 'AWM'];
+      const wepKeys = ['M416', 'AKM', 'AWM'];
       const weapon = wepKeys[botCount % wepKeys.length];
       const bot = {
         id,
