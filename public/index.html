@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebTDM — PUBG Warehouse Arena (LAN)</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three.module.js"
+      }
+    }
+  </script>
+  <style>
+    * { box-sizing: border-box; user-select: none; margin: 0; padding: 0; }
+    body, html {
+      width: 100%; height: 100%; overflow: hidden;
+      background: #0d1117; color: #f0f4f8;
+      font-family: 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
+    }
+    #game-canvas {
+      position: fixed; inset: 0; width: 100%; height: 100%; display: block;
+    }
+
+    /* TOP TDM SCORE HUD */
+    #top-hud {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 10px;
+      background: rgba(12, 16, 23, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 8px; padding: 8px 18px;
+      backdrop-filter: blur(6px); z-index: 10;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    }
+    .team-score-box {
+      display: flex; align-items: center; gap: 10px; min-width: 115px;
+    }
+    .team-score-box.blue { color: #4da3ff; }
+    .team-score-box.red { color: #ff5555; flex-direction: row-reverse; }
+    .team-label { font-weight: 800; font-size: 13px; letter-spacing: 1px; }
+    .team-num { font-weight: 900; font-size: 26px; font-variant-numeric: tabular-nums; }
+    .score-bar-wrap {
+      width: 90px; height: 8px; background: rgba(255,255,255,0.1);
+      border-radius: 4px; overflow: hidden;
+    }
+    .score-bar-fill { height: 100%; width: 0%; transition: width 0.2s ease; }
+    .blue .score-bar-fill { background: linear-gradient(90deg, #1f6feb, #58a6ff); }
+    .red .score-bar-fill { background: linear-gradient(90deg, #da3633, #ff7b72); }
+
+    #match-center {
+      text-align: center; padding: 0 12px;
+      border-left: 1px solid rgba(255,255,255,0.12);
+      border-right: 1px solid rgba(255,255,255,0.12);
+    }
+    #mode-badge {
+      font-size: 11px; font-weight: 800; color: #f2b722; letter-spacing: 1.2px;
+    }
+    #timer-text {
+      font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums;
+    }
+    #target-text {
+      font-size: 10px; color: #9ca3af;
+    }
+
+    /* KILLFEED */
+    #killfeed {
+      position: fixed; top: 16px; right: 16px;
+      display: flex; flex-direction: column; gap: 6px;
+      align-items: flex-end; z-index: 10; pointer-events: none;
+    }
+    .kill-item {
+      background: rgba(12, 16, 22, 0.82);
+      border-right: 3px solid #f2b722;
+      padding: 5px 11px; border-radius: 4px;
+      font-size: 13px; font-weight: 600;
+      display: flex; align-items: center; gap: 7px;
+      animation: fadeSlide 0.2s ease;
+    }
+    @keyframes fadeSlide {
+      from { opacity: 0; transform: translateX(16px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .kf-blue { color: #58a6ff; }
+    .kf-red { color: #ff6b6b; }
+    .kf-wep {
+      background: rgba(255,255,255,0.1); padding: 1px 6px;
+      border-radius: 3px; font-size: 11px; color: #e5e7eb;
+    }
+    .kf-hs { color: #ff4444; font-weight: 900; font-size: 11px; }
+
+    /* CENTER CROSSHAIR & HITMARKER */
+    #crosshair {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 32px; height: 32px; pointer-events: none; z-index: 8;
+    }
+    .ch-line {
+      position: absolute; background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 0 3px rgba(0,0,0,0.9);
+      transition: transform 0.06s ease;
+    }
+    .ch-top { width: 2px; height: 8px; left: 15px; top: 2px; }
+    .ch-bot { width: 2px; height: 8px; left: 15px; bottom: 2px; }
+    .ch-left { height: 2px; width: 8px; top: 15px; left: 2px; }
+    .ch-right { height: 2px; width: 8px; top: 15px; right: 2px; }
+    .ch-dot {
+      position: absolute; width: 2px; height: 2px;
+      background: #f2b722; left: 15px; top: 15px;
+    }
+
+    /* SNIPER SCOPE OVERLAY */
+    #sniper-scope {
+      position: fixed; inset: 0; pointer-events: none; z-index: 7;
+      display: none;
+      background: radial-gradient(circle, transparent 29%, rgba(0,0,0,0.96) 31%);
+    }
+    #sniper-scope::before, #sniper-scope::after {
+      content: ''; position: absolute; background: rgba(0, 0, 0, 0.85);
+    }
+    #sniper-scope::before { top: 50%; left: 20%; right: 20%; height: 1.5px; }
+    #sniper-scope::after { left: 50%; top: 15%; bottom: 15%; width: 1.5px; }
+    #scope-dot {
+      position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
+      transform: translate(-50%, -50%); border-radius: 50%; background: #ff2a2a;
+      box-shadow: 0 0 6px #ff2a2a;
+    }
+
+    /* HITMARKER */
+    #hitmarker {
+      position: fixed; top: 50%; left: 50%; width: 26px; height: 26px;
+      transform: translate(-50%, -50%) rotate(45deg);
+      pointer-events: none; z-index: 9; opacity: 0;
+      transition: opacity 0.08s ease;
+    }
+    #hitmarker::before, #hitmarker::after {
+      content: ''; position: absolute; background: #fff;
+    }
+    #hitmarker::before { width: 100%; height: 2px; top: 12px; left: 0; }
+    #hitmarker::after { height: 100%; width: 2px; left: 12px; top: 0; }
+    #hitmarker.headshot::before, #hitmarker.headshot::after {
+      background: #ff3b3b; box-shadow: 0 0 8px #ff3b3b;
+    }
+    #hitmarker.shield::before, #hitmarker.shield::after {
+      background: #38bdf8;
+    }
+
+    #dmg-pop {
+      position: fixed; top: 45%; left: 52%;
+      font-weight: 900; font-size: 18px; color: #f2b722;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.9);
+      pointer-events: none; z-index: 9; opacity: 0;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    /* DAMAGE VIGNETTE */
+    #damage-vignette {
+      position: fixed; inset: 0; pointer-events: none; z-index: 6;
+      box-shadow: inset 0 0 110px rgba(220, 38, 38, 0);
+      transition: box-shadow 0.18s ease;
+    }
+
+    /* STREAK / STATUS BANNER */
+    #center-banner {
+      position: fixed; top: 22%; left: 50%; transform: translateX(-50%);
+      font-size: 28px; font-weight: 900; color: #f2b722;
+      text-shadow: 0 4px 16px rgba(0,0,0,0.85);
+      letter-spacing: 2px; pointer-events: none; z-index: 11;
+      opacity: 0; transition: opacity 0.25s ease;
+    }
+
+    /* BOTTOM PLAYER HUD */
+    #bottom-hud {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: flex-end; gap: 20px; z-index: 10;
+      pointer-events: none;
+    }
+    .hud-card {
+      background: rgba(12, 16, 23, 0.85);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 8px; padding: 10px 16px;
+      backdrop-filter: blur(6px);
+    }
+    #hp-card { min-width: 240px; }
+    .hp-top {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-bottom: 6px;
+    }
+    #hp-val { font-size: 24px; font-weight: 900; color: #fff; }
+    #status-tag { font-size: 11px; font-weight: 800; color: #38bdf8; }
+    .hp-bar-bg {
+      width: 100%; height: 12px; background: rgba(255,255,255,0.12);
+      border-radius: 4px; overflow: hidden;
+    }
+    #hp-bar-fill {
+      height: 100%; width: 100%;
+      background: linear-gradient(90deg, #22c55e, #4ade80);
+      transition: width 0.15s ease, background 0.2s ease;
+    }
+
+    #ammo-card { min-width: 200px; display: flex; justify-content: space-between; align-items: center; }
+    #wep-name { font-size: 18px; font-weight: 900; color: #f2b722; }
+    #wep-slots { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+    #ammo-count { font-size: 28px; font-weight: 900; font-variant-numeric: tabular-nums; }
+    #ammo-inf { font-size: 16px; color: #9ca3af; }
+
+    /* WEAPON BAR */
+    #weapon-strip {
+      position: fixed; bottom: 18px; right: 20px;
+      display: flex; gap: 6px; z-index: 10; pointer-events: none;
+    }
+    .wep-pill {
+      background: rgba(12, 16, 23, 0.78);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 6px; padding: 6px 10px;
+      font-size: 12px; font-weight: 700; color: #9ca3af;
+    }
+    .wep-pill.active {
+      border-color: #f2b722; color: #fff;
+      background: rgba(242, 183, 34, 0.18);
+    }
+
+    /* CONTROLS HELP MINI */
+    #controls-hint {
+      position: fixed; bottom: 18px; left: 20px;
+      background: rgba(12, 16, 23, 0.75);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px; padding: 8px 12px;
+      font-size: 11px; color: #9ca3af; line-height: 1.5; z-index: 10;
+      pointer-events: none;
+    }
+    #controls-hint b { color: #e5e7eb; }
+
+    /* SCOREBOARD (TAB) */
+    #scoreboard {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: min(640px, 92vw);
+      background: rgba(11, 15, 22, 0.94);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 10px; padding: 18px; z-index: 25;
+      display: none; backdrop-filter: blur(10px);
+    }
+    #scoreboard h3 {
+      color: #f2b722; font-size: 16px; letter-spacing: 1px; margin-bottom: 12px;
+      display: flex; justify-content: space-between;
+    }
+    table.sb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .sb-table th {
+      text-align: left; color: #9ca3af; padding: 6px 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.12);
+    }
+    .sb-table td {
+      padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,0.06);
+      font-weight: 600;
+    }
+
+    /* LOBBY / ESC MENU OVERLAY */
+    #lobby-overlay {
+      position: fixed; inset: 0;
+      background: radial-gradient(circle at center, rgba(15, 23, 34, 0.78), rgba(7, 10, 15, 0.94));
+      display: flex; align-items: center; justify-content: center;
+      z-index: 30; backdrop-filter: blur(6px);
+    }
+    .lobby-panel {
+      width: min(560px, 94vw);
+      background: rgba(16, 22, 31, 0.95);
+      border: 1px solid rgba(242, 183, 34, 0.35);
+      border-radius: 12px; padding: 24px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.7);
+    }
+    .lobby-title {
+      font-size: 26px; font-weight: 900; color: #f2b722;
+      letter-spacing: 1.5px; margin-bottom: 4px;
+    }
+    .lobby-sub { font-size: 13px; color: #9ca3af; margin-bottom: 16px; }
+    .lan-box {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px dashed rgba(56, 189, 248, 0.45);
+      border-radius: 8px; padding: 10px 12px; margin-bottom: 16px;
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    }
+    .lan-box-text { font-size: 12px; color: #cbd5e1; }
+    .lan-box-url { font-weight: 800; color: #38bdf8; font-size: 14px; user-select: text; }
+    .btn-small {
+      background: #1e293b; color: #e2e8f0; border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-small:hover { background: #334155; }
+
+    .field-group { margin-bottom: 14px; }
+    .field-label {
+      display: block; font-size: 11px; font-weight: 800;
+      color: #9ca3af; text-transform: uppercase; letter-spacing: 1px;
+      margin-bottom: 6px;
+    }
+    .text-input {
+      width: 100%; padding: 10px 12px;
+      background: #0d131c; border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 6px; color: #fff; font-size: 15px; font-weight: 700;
+    }
+    .seg-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+    .seg-btn {
+      background: #0d131c; border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px; padding: 9px 10px; color: #cbd5e1;
+      font-size: 13px; font-weight: 700; cursor: pointer; text-align: center;
+      transition: all 0.12s ease;
+    }
+    .seg-btn:hover { border-color: rgba(255,255,255,0.35); }
+    .seg-btn.active {
+      background: rgba(242, 183, 34, 0.18);
+      border-color: #f2b722; color: #fff;
+    }
+    .seg-btn small { display: block; font-size: 10px; color: #9ca3af; font-weight: 500; margin-top: 2px; }
+
+    .bot-row {
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(255,255,255,0.04); padding: 8px 12px; border-radius: 6px;
+      margin-bottom: 16px; font-size: 12px; color: #cbd5e1;
+    }
+    .deploy-btn {
+      width: 100%; padding: 13px;
+      background: linear-gradient(135deg, #f2b722, #d97706);
+      border: none; border-radius: 8px;
+      color: #0b0f17; font-size: 16px; font-weight: 900;
+      letter-spacing: 1.2px; cursor: pointer;
+      box-shadow: 0 6px 20px rgba(242, 183, 34, 0.35);
+    }
+    .deploy-btn:hover { filter: brightness(1.08); }
+  </style>
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <!-- TOP SCOREBOARD BAR -->
+  <div id="top-hud">
+    <div class="team-score-box blue" id="blue-box">
+      <div>
+        <div class="team-label" id="left-label">BLUE</div>
+        <div class="score-bar-wrap"><div class="score-bar-fill" id="blue-bar"></div></div>
+      </div>
+      <div class="team-num" id="blue-score">0</div>
+    </div>
+
+    <div id="match-center">
+      <div id="mode-badge">TEAM TDM</div>
+      <div id="timer-text">10:00</div>
+      <div id="target-text">FIRST TO 40</div>
+    </div>
+
+    <div class="team-score-box red" id="red-box">
+      <div>
+        <div class="team-label" id="right-label">RED</div>
+        <div class="score-bar-wrap"><div class="score-bar-fill" id="red-bar"></div></div>
+      </div>
+      <div class="team-num" id="red-score">0</div>
+    </div>
+  </div>
+
+  <!-- KILLFEED -->
+  <div id="killfeed"></div>
+
+  <!-- CROSSHAIR & SCOPE -->
+  <div id="sniper-scope"><div id="scope-dot"></div></div>
+  <div id="crosshair">
+    <div class="ch-line ch-top" id="ch-t"></div>
+    <div class="ch-line ch-bot" id="ch-b"></div>
+    <div class="ch-line ch-left" id="ch-l"></div>
+    <div class="ch-line ch-right" id="ch-r"></div>
+    <div class="ch-dot"></div>
+  </div>
+  <div id="hitmarker"></div>
+  <div id="dmg-pop"></div>
+  <div id="damage-vignette"></div>
+  <div id="center-banner"></div>
+
+  <!-- BOTTOM HUD -->
+  <div id="bottom-hud">
+    <div class="hud-card" id="hp-card">
+      <div class="hp-top">
+        <span id="hp-val">100 HP</span>
+        <span id="status-tag">READY</span>
+      </div>
+      <div class="hp-bar-bg"><div id="hp-bar-fill"></div></div>
+    </div>
+
+    <div class="hud-card" id="ammo-card">
+      <div>
+        <div id="wep-name">M416</div>
+        <div id="wep-slots">[1-4] Switch • [R] Reload</div>
+      </div>
+      <div>
+        <span id="ammo-count">30</span><span id="ammo-inf"> / ∞</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="weapon-strip">
+    <div class="wep-pill active" data-wep="M416">1 M416</div>
+    <div class="wep-pill" data-wep="AKM">2 AKM</div>
+    <div class="wep-pill" data-wep="AWM">3 AWM</div>
+    <div class="wep-pill" data-wep="S12K">4 S12K</div>
+  </div>
+
+  <div id="controls-hint">
+    <b>WASD</b> Move &bull; <b>Shift</b> Sprint &bull; <b>Space</b> Jump &bull; <b>C</b> Crouch<br/>
+    <b>L-Click</b> Fire &bull; <b>R-Click</b> ADS / Scope &bull; <b>Tab</b> Scoreboard &bull; <b>Esc</b> Loadout
+  </div>
+
+  <!-- TAB SCOREBOARD -->
+  <div id="scoreboard">
+    <h3>
+      <span id="sb-title">WAREHOUSE TDM — SCOREBOARD</span>
+      <span style="font-size:12px;color:#9ca3af">Hold TAB</span>
+    </h3>
+    <table class="sb-table">
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Team</th>
+          <th>Weapon</th>
+          <th>Kills</th>
+          <th>Deaths</th>
+          <th>K/D</th>
+          <th>Streak</th>
+        </tr>
+      </thead>
+      <tbody id="sb-body"></tbody>
+    </table>
+  </div>
+
+  <!-- LOBBY / LOADOUT MODAL -->
+  <div id="lobby-overlay">
+    <div class="lobby-panel">
+      <div class="lobby-title">PUBG WAREHOUSE TDM</div>
+      <div class="lobby-sub">Local Network Multiplayer Arena &mdash; Team Mode &amp; Free-For-All</div>
+
+      <div class="lan-box">
+        <div>
+          <div class="lan-box-text">Share this LAN link with colleagues on your Wi-Fi / Ethernet:</div>
+          <div class="lan-box-url" id="lan-url-text">Connecting...</div>
+        </div>
+        <button class="btn-small" id="copy-lan-btn" type="button">Copy URL</button>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="name-input">Soldier Callsign</label>
+        <input class="text-input" id="name-input" maxlength="16" placeholder="Enter your name..." />
+      </div>
+
+      <div class="field-group">
+        <span class="field-label">Game Mode (Applies to Arena)</span>
+        <div class="seg-row" id="mode-select">
+          <button type="button" class="seg-btn active" data-mode="TEAM">
+            TEAM DEATHMATCH
+            <small>Blue vs Red • 40 Kills</small>
+          </button>
+          <button type="button" class="seg-btn" data-mode="FFA">
+            FREE FOR ALL
+            <small>Every Player Solo • 20 Kills</small>
+          </button>
+        </div>
+      </div>
+
+      <div class="field-group" id="team-group">
+        <span class="field-label">Squad Selection</span>
+        <div class="seg-row" id="team-select">
+          <button type="button" class="seg-btn active" data-team="AUTO">AUTO BALANCE</button>
+          <button type="button" class="seg-btn" data-team="BLUE" style="color:#58a6ff">BLUE SQUAD</button>
+          <button type="button" class="seg-btn" data-team="RED" style="color:#ff6b6b">RED SQUAD</button>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <span class="field-label">Primary Weapon Loadout</span>
+        <div class="seg-row" id="wep-select">
+          <button type="button" class="seg-btn active" data-wep="M416">
+            1. M416
+            <small>Fast Auto AR • 25 Dmg</small>
+          </button>
+          <button type="button" class="seg-btn" data-wep="AKM">
+            2. AKM
+            <small>Heavy Auto • 35 Dmg</small>
+          </button>
+          <button type="button" class="seg-btn" data-wep="AWM">
+            3. AWM
+            <small>8x Sniper • 105 Dmg</small>
+          </button>
+          <button type="button" class="seg-btn" data-wep="S12K">
+            4. S12K
+            <small>Shotgun • 8 Pellets</small>
+          </button>
+        </div>
+      </div>
+
+      <div class="bot-row">
+        <span>Practice / Fill Server with AI Bots:</span>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn-small" id="add-bot-btn">+ Add Bot</button>
+          <button type="button" class="btn-small" id="rem-bot-btn">&minus; Remove Bot</button>
+        </div>
+      </div>
+
+      <button type="button" class="deploy-btn" id="deploy-btn">DEPLOY TO ARENA (CLICK TO PLAY)</button>
+    </div>
+  </div>
+
+  <script type="module" src="/game.js"></script>
+</body>
+</html>
