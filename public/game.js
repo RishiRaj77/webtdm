@@ -3,6 +3,9 @@ import {
   ARENA,
   WEAPONS,
   MAP_BOXES,
+  SPAWN_POINTS,
+  rayBoxIntersect,
+  raycastMap,
   resolvePlayerPhysics
 } from './shared.js';
 
@@ -726,19 +729,28 @@ function tryShoot() {
   }
 }
 
-// --- WEBSOCKET CONNECTION ---
+// --- WEBSOCKET CONNECTION (+ STATIC HOST / NETLIFY BOT FALLBACK) ---
 const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${wsProto}//${window.location.host}`);
+let ws = null;
+let localFallback = null;
+
+try {
+  ws = new WebSocket(`${wsProto}//${window.location.host}`);
+} catch {
+  ws = null;
+}
 
 function sendWs(obj) {
-  if (ws.readyState === WebSocket.OPEN) {
+  if (localFallback) {
+    localFallback.onClientMsg(obj);
+    return;
+  }
+  if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(obj));
   }
 }
 
-ws.addEventListener('message', (ev) => {
-  const msg = JSON.parse(ev.data);
-
+function handleServerMessage(msg) {
   if (msg.type === 'init') {
     myState.id = msg.id;
     myState.team = msg.team;
@@ -883,7 +895,197 @@ ws.addEventListener('message', (ev) => {
   } else if (msg.type === 'match_reset') {
     showCenterBanner(`NEW ${msg.mode} MATCH STARTED!`, 2500);
   }
-});
+}
+
+function startLocalFallback() {
+  if (localFallback) return;
+  const players = new Map();
+  let botSeq = 1;
+  const scores = { BLUE: 0, RED: 0 };
+  let mode = 'TEAM';
+  const startedAt = Date.now();
+
+  const pickSpawn = (team) => {
+    const pool = mode === 'FFA' ? SPAWN_POINTS.FFA : team === 'BLUE' ? SPAWN_POINTS.BLUE : SPAWN_POINTS.RED;
+    return pool[Math.floor(Math.random() * pool.length)];
+  };
+
+  const me = {
+    id: 'local_p1', name: myState.name, team: 'BLUE', isBot: false,
+    weapon: 'M416', ammo: 30, reloadUntil: 0, lastShotAt: 0,
+    x: -5, y: 0, z: -51, vx: 0, vy: 0, vz: 0, yaw: Math.PI, pitch: 0,
+    crouch: false, ads: false, hp: 100, dead: false, kills: 0, deaths: 0, streak: 0,
+    invulnUntil: Date.now() + 2500, lastDamagedAt: Date.now()
+  };
+  players.set(me.id, me);
+
+  const addBot = () => {
+    const id = `bot_${botSeq++}`;
+    const names = ['Bot_Viper', 'Bot_Ghost', 'Bot_Falcon', 'Bot_Reaper', 'Bot_Titan', 'Bot_Cobra'];
+    const team = botSeq % 2 === 0 ? 'BLUE' : 'RED';
+    const wep = ['M416', 'AKM', 'S12K', 'AWM'][botSeq % 4];
+    const sp = pickSpawn(team);
+    players.set(id, {
+      id, name: names[(botSeq - 2) % names.length], team, isBot: true,
+      weapon: wep, ammo: WEAPONS[wep].magSize, reloadUntil: 0, lastShotAt: 0,
+      x: sp.x, y: sp.y, z: sp.z, vx: 0, vy: 0, vz: 0, yaw: sp.yaw, pitch: 0,
+      crouch: false, ads: false, hp: 100, dead: false, kills: 0, deaths: 0, streak: 0,
+      invulnUntil: 0, lastDamagedAt: Date.now(), aiGoalX: 0, aiGoalZ: 0, aiNext: 0
+    });
+  };
+  for (let i = 0; i < 5; i++) addBot();
+
+  const fireShot = (shooter, origin, dir) => {
+    if (shooter.dead) return;
+    const now = Date.now();
+    const wep = WEAPONS[shooter.weapon] || WEAPONS.M416;
+    if (shooter.reloadUntil > now || now - shooter.lastShotAt < wep.fireRateMs * 0.8) return;
+    shooter.lastShotAt = now;
+    shooter.ammo--;
+    if (shooter.ammo <= 0) shooter.reloadUntil = now + wep.reloadMs;
+
+    const len = Math.hypot(dir.x, dir.y, dir.z) || 1;
+    const rayDir = { x: dir.x / len, y: dir.y / len, z: dir.z / len };
+    const mapHit = raycastMap(origin, rayDir, wep.range, MAP_BOXES);
+    let closest = mapHit ? mapHit.dist : wep.range;
+    let hitTarget = null;
+    let hs = false;
+
+    for (const t of players.values()) {
+      if (t.id === shooter.id || t.dead || (mode === 'TEAM' && t.team === shooter.team)) continue;
+      const bodyH = t.crouch ? 0.82 : 1.32;
+      const dH = rayBoxIntersect(origin, rayDir, { x: t.x, y: t.y + bodyH, z: t.z, w: 0.52, h: 0.44, d: 0.52 }, closest);
+      if (dH !== null && dH < closest) { closest = dH; hitTarget = t; hs = true; }
+      const dB = rayBoxIntersect(origin, rayDir, { x: t.x, y: t.y, z: t.z, w: 0.92, h: bodyH, d: 0.92 }, closest);
+      if (dB !== null && dB < closest) { closest = dB; hitTarget = t; hs = false; }
+    }
+
+    handleServerMessage({
+      type: 'shot', id: shooter.id, weapon: shooter.weapon, origin,
+      traces: [{
+        x: +(origin.x + rayDir.x * closest).toFixed(2),
+        y: +(origin.y + rayDir.y * closest).toFixed(2),
+        z: +(origin.z + rayDir.z * closest).toFixed(2),
+        hitPlayer: Boolean(hitTarget)
+      }]
+    });
+
+    if (hitTarget) {
+      const dmg = Math.round(wep.damage * (hs ? wep.headMult : 1));
+      hitTarget.hp = Math.max(0, hitTarget.hp - dmg);
+      hitTarget.lastDamagedAt = now;
+      const killed = hitTarget.hp <= 0;
+      if (shooter.id === me.id) handleServerMessage({ type: 'hitmarker', dmg, headshot: hs, killed });
+      if (hitTarget.id === me.id) handleServerMessage({ type: 'damaged', dmg, hp: hitTarget.hp });
+      if (killed) {
+        hitTarget.dead = true; hitTarget.deaths++; hitTarget.streak = 0; hitTarget.respawnAt = now + 3000;
+        shooter.kills++; shooter.streak++;
+        if (mode === 'TEAM') scores[shooter.team] = (scores[shooter.team] || 0) + 1;
+        handleServerMessage({
+          type: 'kill', killerId: shooter.id, killerName: shooter.name, killerTeam: shooter.team,
+          victimId: hitTarget.id, victimName: hitTarget.name, victimTeam: hitTarget.team,
+          weapon: wep.name, headshot: hs, streak: shooter.streak, scores
+        });
+      }
+    }
+  };
+
+  localFallback = {
+    onClientMsg(m) {
+      if (m.type === 'join') {
+        if (m.name) me.name = m.name;
+        if (m.weapon && WEAPONS[m.weapon]) { me.weapon = m.weapon; me.ammo = WEAPONS[m.weapon].magSize; }
+        if (m.team === 'BLUE' || m.team === 'RED') me.team = m.team;
+        if (m.mode) mode = m.mode;
+      } else if (m.type === 'move') {
+        me.x = m.x; me.y = m.y; me.z = m.z; me.yaw = m.yaw; me.pitch = m.pitch; me.crouch = m.crouch;
+      } else if (m.type === 'shoot') {
+        fireShot(me, m.origin, m.dir);
+      } else if (m.type === 'reload') {
+        me.reloadUntil = Date.now() + (WEAPONS[me.weapon]?.reloadMs || 1800);
+      } else if (m.type === 'weapon' && WEAPONS[m.weapon]) {
+        me.weapon = m.weapon; me.ammo = WEAPONS[m.weapon].magSize; me.reloadUntil = 0;
+      } else if (m.type === 'set_mode') {
+        mode = m.mode; scores.BLUE = 0; scores.RED = 0;
+      } else if (m.type === 'bot') {
+        if (m.action === 'add') addBot();
+        else {
+          for (const [k, v] of players.entries()) { if (v.isBot) { players.delete(k); break; } }
+        }
+      }
+    }
+  };
+
+  handleServerMessage({
+    type: 'init', id: me.id, team: me.team, mode, scores, targetScore: 40,
+    x: me.x, y: me.y, z: me.z, yaw: me.yaw,
+    lanUrls: [`${window.location.origin} (Static Bot Arena)`]
+  });
+
+  setInterval(() => {
+    const now = Date.now();
+    for (const p of players.values()) {
+      if (p.dead && now >= p.respawnAt) {
+        const sp = pickSpawn(p.team);
+        p.x = sp.x; p.y = sp.y; p.z = sp.z; p.yaw = sp.yaw; p.hp = 100; p.dead = false;
+        p.ammo = WEAPONS[p.weapon].magSize;
+        if (p.id === me.id) handleServerMessage({ type: 'respawn', x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: 100, ammo: p.ammo });
+      }
+      if (!p.dead && p.reloadUntil > 0 && now >= p.reloadUntil) {
+        p.reloadUntil = 0; p.ammo = WEAPONS[p.weapon].magSize;
+      }
+      if (!p.dead && p.hp < 100 && now - p.lastDamagedAt >= 5000) p.hp = Math.min(100, p.hp + 0.5);
+      if (p.isBot && !p.dead) {
+        if (now > p.aiNext || Math.hypot(p.aiGoalX - p.x, p.aiGoalZ - p.z) < 2.5) {
+          p.aiGoalX = (Math.random() - 0.5) * 60; p.aiGoalZ = (Math.random() - 0.5) * 74;
+          p.aiNext = now + 3000;
+        }
+        const dx = p.aiGoalX - p.x, dz = p.aiGoalZ - p.z, l = Math.hypot(dx, dz) || 1;
+        p.vx = (dx / l) * 6.5; p.vz = (dz / l) * 6.5;
+        resolvePlayerPhysics(p, 0.04, MAP_BOXES);
+        p.yaw = Math.atan2(-p.vx, -p.vz);
+        if (!me.dead && (mode === 'FFA' || me.team !== p.team)) {
+          const ex = me.x - p.x, ey = me.y + 1.2 - (p.y + 1.5), ez = me.z - p.z;
+          const ed = Math.hypot(ex, ey, ez);
+          if (ed < 55) {
+            const wall = raycastMap({ x: p.x, y: p.y + 1.5, z: p.z }, { x: ex / ed, y: ey / ed, z: ez / ed }, ed);
+            if (!wall || wall.dist >= ed - 0.3) {
+              p.yaw = Math.atan2(-ex, -ez);
+              if (now - p.lastShotAt > 520) {
+                fireShot(p, { x: p.x, y: p.y + 1.5, z: p.z }, {
+                  x: ex + (Math.random() - 0.5) * 3.5,
+                  y: ey + (Math.random() - 0.5) * 2.5,
+                  z: ez + (Math.random() - 0.5) * 3.5
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+    handleServerMessage({
+      type: 'state', mode, scores, targetScore: mode === 'FFA' ? 20 : 40,
+      remainingSec: Math.max(0, 600 - Math.floor((now - startedAt) / 1000)),
+      ended: false, winnerText: '',
+      players: [...players.values()].map((p) => ({
+        id: p.id, name: p.name, team: p.team, isBot: p.isBot,
+        x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2),
+        yaw: +p.yaw.toFixed(3), pitch: +p.pitch.toFixed(3), crouch: p.crouch,
+        weapon: p.weapon, ammo: p.ammo, reloading: p.reloadUntil > now,
+        hp: Math.ceil(p.hp), dead: p.dead, invuln: false,
+        kills: p.kills, deaths: p.deaths, streak: p.streak
+      }))
+    });
+  }, 40);
+}
+
+if (ws) {
+  ws.addEventListener('message', (ev) => handleServerMessage(JSON.parse(ev.data)));
+  ws.addEventListener('error', () => startLocalFallback());
+  ws.addEventListener('close', () => { if (!myState.id) startLocalFallback(); });
+} else {
+  startLocalFallback();
+}
 
 function updateBottomHud() {
   hpValEl.textContent = `${myState.hp} HP`;
