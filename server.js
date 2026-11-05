@@ -308,12 +308,12 @@ export function createGameServer() {
           if (target.id === shooter.id || target.dead) continue;
           if (match.mode === 'TEAM' && target.team === shooter.team) continue;
 
-          const bodyH = target.crouch ? 0.82 : 1.32;
+          const bodyH = target.crouch ? 0.85 : 1.36;
           const headY = target.y + bodyH;
-          const headH = 0.44;
+          const headH = 0.52;
 
-          const headBox = { x: target.x, y: headY, z: target.z, w: 0.52, h: headH, d: 0.52 };
-          const bodyBox = { x: target.x, y: target.y, z: target.z, w: 0.92, h: bodyH, d: 0.92 };
+          const headBox = { x: target.x, y: headY, z: target.z, w: 0.64, h: headH, d: 0.64 };
+          const bodyBox = { x: target.x, y: target.y, z: target.z, w: 1.05, h: bodyH, d: 1.05 };
 
           const dHead = rayBoxIntersect(safeOrigin, rayDir, headBox, closestDist);
           if (dHead !== null && dHead < closestDist) {
@@ -454,7 +454,8 @@ export function createGameServer() {
       const ny = dir.y / len;
       const nz = dir.z / len;
 
-      const nearWall = raycastMap({ x: ox, y: oy, z: oz }, { x: nx, y: ny, z: nz }, 0.65, MAP_BOXES);
+      const mapBoxes = getMap(match.map).boxes;
+      const nearWall = raycastMap({ x: ox, y: oy, z: oz }, { x: nx, y: ny, z: nz }, 0.65, mapBoxes);
       const spawnDist = nearWall ? Math.max(0.05, nearWall.dist - 0.18) : 0.45;
 
       const proj = {
@@ -501,6 +502,7 @@ export function createGameServer() {
 
       const blastOrigin = { x: proj.x, y: proj.y + 0.45, z: proj.z };
       const owner = players.get(proj.ownerId);
+      const mapBoxes = getMap(match.map).boxes;
 
       if (proj.kind === 'GRENADE') {
         for (const target of players.values()) {
@@ -521,11 +523,11 @@ export function createGameServer() {
           if (dist > cfg.radius) continue;
 
           const dirChest = { x: tx / (dist || 1), y: ty / (dist || 1), z: tz / (dist || 1) };
-          const wallChest = raycastMap(blastOrigin, dirChest, dist, MAP_BOXES);
+          const wallChest = raycastMap(blastOrigin, dirChest, dist, mapBoxes);
           const headY = target.y + 1.48 - blastOrigin.y;
           const distHead = Math.hypot(tx, headY, tz) || 1;
           const dirHead = { x: tx / distHead, y: headY / distHead, z: tz / distHead };
-          const wallHead = raycastMap(blastOrigin, dirHead, distHead, MAP_BOXES);
+          const wallHead = raycastMap(blastOrigin, dirHead, distHead, mapBoxes);
 
           const clearLos =
             (!wallChest || wallChest.dist >= dist - 0.35) ||
@@ -595,7 +597,7 @@ export function createGameServer() {
           if (dist > cfg.radius) continue;
 
           const dir = { x: tx / (dist || 1), y: ty / (dist || 1), z: tz / (dist || 1) };
-          const wall = raycastMap(blastOrigin, dir, dist, MAP_BOXES);
+          const wall = raycastMap(blastOrigin, dir, dist, mapBoxes);
           if (wall && wall.dist < dist - 0.35) continue;
 
           const intensity = Math.max(0.28, 1 - dist / cfg.radius);
@@ -683,6 +685,7 @@ export function createGameServer() {
     }
 
     function updateBots(now, dt) {
+      const mapBoxes = getMap(match.map).boxes;
       for (const bot of players.values()) {
         if (!bot.isBot || bot.dead || match.ended) continue;
 
@@ -705,7 +708,7 @@ export function createGameServer() {
           const dist = Math.hypot(dx, dy, dz);
           if (dist < bestDist) {
             const dir = { x: dx / dist, y: dy / dist, z: dz / dist };
-            const wall = raycastMap(eyeOrigin, dir, dist);
+            const wall = raycastMap(eyeOrigin, dir, dist, mapBoxes);
             if (!wall || wall.dist >= dist - 0.3) {
               bestDist = dist;
               bestEnemy = other;
@@ -722,7 +725,7 @@ export function createGameServer() {
 
         const prevX = bot.x;
         const prevZ = bot.z;
-        resolvePlayerPhysics(bot, dt, MAP_BOXES);
+        resolvePlayerPhysics(bot, dt, mapBoxes);
         if (Math.hypot(bot.x - prevX, bot.z - prevZ) < 0.02) {
           bot.aiNextGoalAt = 0;
         }
@@ -785,9 +788,10 @@ export function createGameServer() {
       updateBots(now, dt);
 
       // Update active grenades & flashbangs
+      const mapBoxes = getMap(match.map).boxes;
       for (let i = throwables.length - 1; i >= 0; i--) {
         const proj = throwables[i];
-        stepThrowablePhysics(proj, dt, MAP_BOXES);
+        stepThrowablePhysics(proj, dt, mapBoxes);
         if (now >= proj.detonateAt) {
           throwables.splice(i, 1);
           detonateThrowable(proj, now);
@@ -856,6 +860,7 @@ export function createGameServer() {
         room: code,
         rooms: roomList,
         mode: match.mode,
+        map: match.map,
         scores: match.scores,
         targetScore: match.targetScore[match.mode],
         remainingSec,
@@ -1002,6 +1007,7 @@ export function createGameServer() {
         rooms: getRoomSummaries(),
         team: player.team,
         mode: room.match.mode,
+        map: room.match.map,
         scores: room.match.scores,
         targetScore: room.match.targetScore[room.match.mode],
         x: player.x,
@@ -1049,16 +1055,18 @@ export function createGameServer() {
           }
         }
 
-        if (msg.mode === 'TEAM' || msg.mode === 'FFA') {
-          if (msg.mode !== curRoom.match.mode) {
-            curRoom.resetMatch(msg.mode);
-          }
+        const desiredMode =
+          msg.mode === 'TEAM' || msg.mode === 'FFA' ? msg.mode : curRoom.match.mode;
+        const desiredMap = msg.map && MAPS[msg.map] ? msg.map : curRoom.match.map;
+        if (desiredMode !== curRoom.match.mode || desiredMap !== curRoom.match.map) {
+          curRoom.resetMatch(desiredMode, desiredMap);
         }
 
         ws.send(
           JSON.stringify({
             type: 'respawn',
             room: curRoom.code,
+            map: curRoom.match.map,
             x: player.x,
             y: player.y,
             z: player.z,
@@ -1121,7 +1129,11 @@ export function createGameServer() {
         }
       } else if (msg.type === 'set_mode') {
         if (msg.mode === 'TEAM' || msg.mode === 'FFA') {
-          curRoom.resetMatch(msg.mode);
+          curRoom.resetMatch(msg.mode, curRoom.match.map);
+        }
+      } else if (msg.type === 'set_map') {
+        if (msg.map && MAPS[msg.map] && msg.map !== curRoom.match.map) {
+          curRoom.resetMatch(curRoom.match.mode, msg.map);
         }
       } else if (msg.type === 'restart_match') {
         curRoom.resetMatch(curRoom.match.mode);

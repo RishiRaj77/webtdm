@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { createGameServer } from './server.js';
-import { rayBoxIntersect, resolvePlayerPhysics, stepThrowablePhysics, THROWABLES, WEAPONS } from './public/shared.js';
+import { rayBoxIntersect, resolvePlayerPhysics, stepThrowablePhysics, THROWABLES, WEAPONS, MAPS, getMap } from './public/shared.js';
 
 // 1. Ray-Box intersection check
 const box = { x: 0, y: 0, z: -10, w: 2, h: 2, d: 2 };
@@ -87,21 +87,22 @@ await new Promise((r) => setTimeout(r, 60));
 assert.equal(p2.dead, true, '2nd AWM body shot should eliminate target');
 assert.equal(p1.kills, 1, 'Shooter should have 1 kill after 2 body shots');
 
-// 2) Respawn target at full 100 HP and verify 1 AWM headshot (y = 1.5 -> 110 dmg) is an instant 1-shot kill
-p2.dead = false; p2.hp = 100; p2.invulnUntil = 0;
+// 2) Respawn target at full 100 HP at 102m long range across sniper decks (z = -51 to z = +51) and verify 1 AWM headshot is an instant 1-shot kill
+p1.x = -32; p1.y = 2.2; p1.z = -51; p1.invulnUntil = 0;
+p2.x = -32; p2.y = 2.2; p2.z = 51;  p2.dead = false; p2.hp = 100; p2.invulnUntil = 0;
 p1.lastShotAt = 0;
 c1.ws.send(
   JSON.stringify({
     type: 'shoot',
-    origin: { x: -37, y: 1.5, z: -5 },
+    origin: { x: -32, y: 3.82, z: -51 },
     dir: { x: 0, y: 0, z: 1 }
   })
 );
 
 await new Promise((r) => setTimeout(r, 60));
-assert.equal(p1.kills, 2, 'Shooter should be credited with 2nd kill after headshot');
+assert.equal(p1.kills, 2, 'Shooter should be credited with 2nd kill after 102m long-range headshot');
 assert.equal(match.scores.BLUE, 2, 'Blue team score should be 2');
-assert.equal(p2.dead, true, 'Target should be eliminated in 1 headshot');
+assert.equal(p2.dead, true, 'Target should be eliminated in 1 headshot at 102m');
 
 // Test restart_match resets kills and scores
 c1.ws.send(JSON.stringify({ type: 'restart_match' }));
@@ -129,7 +130,15 @@ await new Promise((r) => setTimeout(r, 50));
 assert.equal(p1.flashes, 1, 'Throwing FLASH should decrement flashbang count to 1');
 assert.ok(c1.msgs.some((m) => m.type === 'throw_spawn' && m.kind === 'FLASH'), 'Clients should receive throw_spawn for FLASH');
 
-// Switch to FFA mode and test bots
+// Switch to FFA mode, test map switching (RUINS / SHIPYARD) and test bots
+assert.ok(MAPS.WAREHOUSE && MAPS.RUINS && MAPS.SHIPYARD, 'All 3 maps should be defined');
+assert.equal(getMap('RUINS').id, 'RUINS');
+assert.ok(getMap('SHIPYARD').boxes.length > 20, 'SHIPYARD should have obstacles');
+
+c1.ws.send(JSON.stringify({ type: 'set_map', map: 'RUINS' }));
+await new Promise((r) => setTimeout(r, 50));
+assert.equal(match.map, 'RUINS', 'set_map should switch room map to RUINS');
+
 c1.ws.send(JSON.stringify({ type: 'set_mode', mode: 'FFA' }));
 await new Promise((r) => setTimeout(r, 50));
 assert.equal(match.mode, 'FFA');

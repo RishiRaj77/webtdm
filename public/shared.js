@@ -10,8 +10,8 @@ export const ARENA = {
   playerRadius: 0.55,
   standHeight: 1.75,
   crouchHeight: 1.15,
-  standEye: 1.58,
-  crouchEye: 1.0
+  standEye: 1.62,
+  crouchEye: 1.08
 };
 
 export const WEAPONS = {
@@ -25,12 +25,12 @@ export const WEAPONS = {
     fireRateMs: 92,
     magSize: 30,
     reloadMs: 1750,
-    spread: 0.0035,
-    adsSpread: 0.0004,
+    spread: 0.0015,
+    adsSpread: 0,
     recoilPitch: 0.0032,
     recoilYaw: 0.001,
     adsFov: 48,
-    range: 170,
+    range: 500,
     pellets: 1,
     auto: true,
     color: 0x383e46,
@@ -46,12 +46,12 @@ export const WEAPONS = {
     fireRateMs: 122,
     magSize: 30,
     reloadMs: 1950,
-    spread: 0.0055,
-    adsSpread: 0.0008,
+    spread: 0.0022,
+    adsSpread: 0,
     recoilPitch: 0.0052,
     recoilYaw: 0.0018,
     adsFov: 52,
-    range: 155,
+    range: 500,
     pellets: 1,
     auto: true,
     color: 0x724729,
@@ -67,12 +67,12 @@ export const WEAPONS = {
     fireRateMs: 1050,
     magSize: 5,
     reloadMs: 2400,
-    spread: 0.015,
-    adsSpread: 0.0001,
+    spread: 0.005,
+    adsSpread: 0,
     recoilPitch: 0.016,
     recoilYaw: 0.002,
     adsFov: 18,
-    range: 240,
+    range: 600,
     pellets: 1,
     auto: false,
     sniper: true,
@@ -195,7 +195,7 @@ export const MAPS = {
     desc: 'Industrial Hangar • CQB & Side Lanes',
     skyColor: 0x18222f,
     fogColor: 0x18222f,
-    fogDensity: 0.0065,
+    fogDensity: 0.0022,
     floorBase: '#252a32',
     floorGrid: '#2f3640',
     roofBeams: true,
@@ -208,7 +208,7 @@ export const MAPS = {
     desc: 'Ancient Temple • Open Sightlines & Pillars',
     skyColor: 0x2d2118,
     fogColor: 0x2d2118,
-    fogDensity: 0.0055,
+    fogDensity: 0.0018,
     floorBase: '#6b583e',
     floorGrid: '#594832',
     roofBeams: false,
@@ -283,7 +283,7 @@ export const MAPS = {
     desc: 'Night Container Port • Tight Alleys & Catwalks',
     skyColor: 0x0b131e,
     fogColor: 0x0b131e,
-    fogDensity: 0.0075,
+    fogDensity: 0.0025,
     floorBase: '#1b222c',
     floorGrid: '#26303d',
     roofBeams: false,
@@ -390,7 +390,7 @@ export function rayBoxIntersect(origin, dir, box, maxDist = Infinity) {
   }
 
   if (tmax < 0) return null;
-  const hitDist = tmin >= 0 ? tmin : tmax;
+  const hitDist = tmin >= 0 ? tmin : 0;
   return hitDist <= maxDist ? hitDist : null;
 }
 
@@ -400,7 +400,7 @@ export function raycastMap(origin, dir, maxDist = Infinity, boxes = MAP_BOXES) {
   // Also check ground plane y=0
   if (dir.y < -1e-6 && origin.y > 0) {
     const tg = -origin.y / dir.y;
-    if (tg >= 0 && tg < closest) {
+    if (tg > 0.05 && tg < closest) {
       closest = tg;
       hitBox = { tag: 'ground' };
     }
@@ -408,7 +408,7 @@ export function raycastMap(origin, dir, maxDist = Infinity, boxes = MAP_BOXES) {
   for (let i = 0; i < boxes.length; i++) {
     const b = boxes[i];
     const d = rayBoxIntersect(origin, dir, b, closest);
-    if (d !== null && d < closest) {
+    if (d !== null && d > 0.05 && d < closest) {
       closest = d;
       hitBox = b;
     }
