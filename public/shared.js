@@ -336,3 +336,91 @@ export function resolvePlayerPhysics(state, dt, boxes = MAP_BOXES) {
     state.grounded = false;
   }
 }
+
+export const THROWABLES = {
+  GRENADE: {
+    id: 'GRENADE',
+    name: 'Frag Grenade',
+    maxCount: 2,
+    fuseMs: 1800,
+    speed: 20,
+    upBoost: 3.4,
+    radius: 11.0,
+    maxDamage: 130
+  },
+  FLASH: {
+    id: 'FLASH',
+    name: 'Flashbang',
+    maxCount: 2,
+    fuseMs: 1350,
+    speed: 22,
+    upBoost: 2.8,
+    radius: 19.0,
+    maxDurationMs: 3200
+  }
+};
+
+export function stepThrowablePhysics(proj, dt, boxes = MAP_BOXES) {
+  const r = 0.14;
+  proj.vy -= 22 * dt;
+
+  // Move X/Z and bounce against walls/crates
+  const nextX = proj.x + proj.vx * dt;
+  const nextZ = proj.z + proj.vz * dt;
+  const limX = ARENA.width / 2 - 0.9;
+  const limZ = ARENA.depth / 2 - 0.9;
+
+  if (nextX < -limX || nextX > limX) {
+    proj.vx *= -0.6;
+  } else {
+    proj.x = nextX;
+  }
+  if (nextZ < -limZ || nextZ > limZ) {
+    proj.vz *= -0.6;
+  } else {
+    proj.z = nextZ;
+  }
+
+  const prevY = proj.y;
+  proj.y += proj.vy * dt;
+
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i];
+    const minX = b.x - b.w / 2 - r;
+    const maxX = b.x + b.w / 2 + r;
+    const minZ = b.z - b.d / 2 - r;
+    const maxZ = b.z + b.d / 2 + r;
+    const topY = b.y + b.h + r;
+
+    if (proj.x >= minX && proj.x <= maxX && proj.z >= minZ && proj.z <= maxZ) {
+      if (prevY >= topY - 0.12 && proj.y <= topY && proj.vy < 0) {
+        proj.y = topY;
+        proj.vy = -proj.vy * 0.45;
+        proj.vx *= 0.76;
+        proj.vz *= 0.76;
+        continue;
+      }
+      if (proj.y < topY && proj.y > b.y) {
+        const dLeft = Math.abs(proj.x - minX);
+        const dRight = Math.abs(maxX - proj.x);
+        const dFront = Math.abs(proj.z - minZ);
+        const dBack = Math.abs(maxZ - proj.z);
+        const m = Math.min(dLeft, dRight, dFront, dBack);
+        if (m === dLeft || m === dRight) {
+          proj.vx *= -0.6;
+          proj.x = m === dLeft ? minX - 0.01 : maxX + 0.01;
+        } else {
+          proj.vz *= -0.6;
+          proj.z = m === dFront ? minZ - 0.01 : maxZ + 0.01;
+        }
+      }
+    }
+  }
+
+  if (proj.y <= r) {
+    proj.y = r;
+    proj.vy = Math.abs(proj.vy) > 1.2 ? -proj.vy * 0.45 : 0;
+    proj.vx *= 0.78;
+    proj.vz *= 0.78;
+  }
+}

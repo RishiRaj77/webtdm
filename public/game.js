@@ -2,11 +2,13 @@ import * as THREE from 'three';
 import {
   ARENA,
   WEAPONS,
+  THROWABLES,
   MAP_BOXES,
   SPAWN_POINTS,
   rayBoxIntersect,
   raycastMap,
-  resolvePlayerPhysics
+  resolvePlayerPhysics,
+  stepThrowablePhysics
 } from './shared.js';
 
 // --- PROCEDURAL AUDIO SYNTH (Zero external assets required) ---
@@ -83,6 +85,93 @@ class SoundFX {
     gain.connect(this.ctx.destination);
     osc.start(now);
     osc.stop(now + 0.12);
+  }
+  playDeath() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(190, now);
+    osc.frequency.exponentialRampToValueAtTime(48, now + 0.42);
+    gain.gain.setValueAtTime(0.32, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.45);
+  }
+  playRespawn() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.setValueAtTime(660, now + 0.08);
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.24);
+  }
+  playThrow() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(580, now);
+    osc.frequency.exponentialRampToValueAtTime(210, now + 0.14);
+    gain.gain.setValueAtTime(0.14, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.15);
+  }
+  playExplosion(kind = 'GRENADE', dist = 0) {
+    if (!this.ctx) return;
+    const vol = Math.max(0.06, Math.min(0.75, 0.75 * (1 - dist / 120)));
+    const now = this.ctx.currentTime;
+    const dur = kind === 'GRENADE' ? 0.65 : 0.35;
+    const bufSize = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufSize * 0.32));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buf;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = kind === 'GRENADE' ? 'lowpass' : 'bandpass';
+    filter.frequency.value = kind === 'GRENADE' ? 320 : 1600;
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    noise.start(now);
+  }
+  playFlashTinnitus(durationMs = 2200) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const dur = Math.min(3.5, durationMs / 1000);
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(3650, now);
+    gain.gain.setValueAtTime(0.14, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + dur);
   }
 }
 
@@ -430,8 +519,70 @@ function createSoldierAvatar(teamColorHex) {
   };
 }
 
-// --- BULLET TRACERS & IMPACT SPARKS ---
+// --- BULLET TRACERS, THROWABLES & EXPLOSION EFFECTS ---
 const activeEffects = [];
+const activeThrowables = new Map();
+const activeExplosions = [];
+
+function spawnThrowableMesh(msg) {
+  const group = new THREE.Group();
+  if (msg.kind === 'GRENADE') {
+    const body = new THREE.Mesh(
+      new THREE.SphereGeometry(0.13, 12, 12),
+      new THREE.MeshStandardMaterial({ color: 0x3b5323, roughness: 0.5, metalness: 0.4 })
+    );
+    const ring = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.28, 8),
+      new THREE.MeshBasicMaterial({ color: 0xef4444 })
+    );
+    group.add(body, ring);
+  } else {
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.09, 0.09, 0.26, 12),
+      new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.3, metalness: 0.8 })
+    );
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.095, 0.095, 0.08, 12),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+    );
+    group.add(body, band);
+  }
+  group.position.set(msg.x, msg.y, msg.z);
+  scene.add(group);
+  activeThrowables.set(msg.id, {
+    id: msg.id,
+    kind: msg.kind,
+    mesh: group,
+    x: msg.x,
+    y: msg.y,
+    z: msg.z,
+    vx: msg.vx,
+    vy: msg.vy,
+    vz: msg.vz,
+    born: performance.now(),
+    fuseMs: msg.fuseMs || 1800
+  });
+}
+
+function spawnExplosionEffect(kind, x, y, z) {
+  const isFrag = kind === 'GRENADE';
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 18, 18),
+    new THREE.MeshBasicMaterial({
+      color: isFrag ? 0xff5500 : 0xffffff,
+      transparent: true,
+      opacity: 0.92
+    })
+  );
+  sphere.position.set(x, y + 0.25, z);
+  scene.add(sphere);
+  activeExplosions.push({
+    mesh: sphere,
+    maxScale: isFrag ? 6.5 : 8.5,
+    born: performance.now(),
+    ttl: isFrag ? 340 : 240
+  });
+}
 
 function spawnBulletTracer(start, end, isEnemyHit) {
   const points = [
@@ -466,6 +617,11 @@ const myState = {
   preferredTeam: 'AUTO',
   weapon: 'M416',
   ammo: 30,
+  grenades: 2,
+  flashes: 2,
+  lastThrowAt: 0,
+  flashAlpha: 0,
+  flashDecay: 0.5,
   reloading: false,
   hp: 100,
   dead: false,
@@ -540,10 +696,27 @@ const crosshairEl = document.getElementById('crosshair');
 const hitmarkerEl = document.getElementById('hitmarker');
 const dmgPopEl = document.getElementById('dmg-pop');
 const damageVignetteEl = document.getElementById('damage-vignette');
+const flashbangOverlayEl = document.getElementById('flashbang-overlay');
+const nadeCountEl = document.getElementById('nade-count');
+const flashCountEl = document.getElementById('flash-count');
+const deathOverlayEl = document.getElementById('death-overlay');
+const deathKillerInfoEl = document.getElementById('death-killer-info');
+const deathTimerTextEl = document.getElementById('death-timer-text');
+const deathBarFillEl = document.getElementById('death-bar-fill');
 const centerBannerEl = document.getElementById('center-banner');
 const killfeedEl = document.getElementById('killfeed');
 const scoreboardEl = document.getElementById('scoreboard');
 const sbBodyEl = document.getElementById('sb-body');
+const victoryOverlayEl = document.getElementById('victory-overlay');
+const victoryTitleEl = document.getElementById('victory-title');
+const victoryMvpEl = document.getElementById('victory-mvp');
+const victoryTeamScoresEl = document.getElementById('victory-team-scores');
+const vicBlueScoreEl = document.getElementById('vic-blue-score');
+const vicRedScoreEl = document.getElementById('vic-red-score');
+const victoryTbodyEl = document.getElementById('victory-tbody');
+const restartMatchBtn = document.getElementById('restart-match-btn');
+const victoryLobbyBtn = document.getElementById('victory-lobby-btn');
+let victoryActive = false;
 
 nameInput.value = myState.name;
 roomInput.value = currentRoom;
@@ -671,9 +844,82 @@ deployBtn.addEventListener('click', () => {
   canvas.requestPointerLock();
 });
 
+function showVictoryScreen(msg) {
+  victoryActive = true;
+  if (deathOverlayEl) deathOverlayEl.style.display = 'none';
+  lobbyOverlay.style.display = 'none';
+  if (victoryOverlayEl) victoryOverlayEl.style.display = 'flex';
+  if (document.pointerLockElement === canvas) {
+    document.exitPointerLock();
+  }
+
+  if (victoryTitleEl) victoryTitleEl.textContent = msg.winnerText || 'MATCH COMPLETE!';
+
+  const mode = msg.mode || currentMode;
+  const scores = msg.scores || { BLUE: 0, RED: 0 };
+  if (victoryTeamScoresEl) {
+    victoryTeamScoresEl.style.display = mode === 'TEAM' ? 'flex' : 'none';
+    if (vicBlueScoreEl) vicBlueScoreEl.textContent = String(scores.BLUE || 0);
+    if (vicRedScoreEl) vicRedScoreEl.textContent = String(scores.RED || 0);
+  }
+
+  const list = [...(msg.players || latestPlayers)].sort(
+    (a, b) => b.kills - a.kills || a.deaths - b.deaths
+  );
+  const mvp = list[0];
+  if (victoryMvpEl) {
+    victoryMvpEl.textContent = mvp
+      ? `MVP: ${mvp.name} • ${mvp.kills} Kills (${mvp.weapon || 'M416'})`
+      : 'MATCH FINISHED';
+  }
+
+  if (victoryTbodyEl) {
+    victoryTbodyEl.innerHTML = list
+      .map((p, idx) => {
+        const kd = p.deaths === 0 ? p.kills.toFixed(1) : (p.kills / p.deaths).toFixed(2);
+        const tCol = p.team === 'BLUE' ? '#58a6ff' : '#ff6b6b';
+        const isMe = p.id === myState.id;
+        return `<tr style="${isMe ? 'background:rgba(242,183,34,0.14)' : ''}">
+          <td style="color:#f2b722;font-weight:900">#${idx + 1}</td>
+          <td style="color:${isMe ? '#f2b722' : '#fff'}">${p.name}${isMe ? ' (YOU)' : ''}</td>
+          <td style="color:${tCol}">${mode === 'FFA' ? 'SOLO' : p.team}</td>
+          <td>${p.weapon || 'M416'}</td>
+          <td style="color:#4ade80;font-weight:900">${p.kills}</td>
+          <td>${p.deaths}</td>
+          <td>${kd}</td>
+          <td>${p.streak || 0}</td>
+        </tr>`;
+      })
+      .join('');
+  }
+}
+
+function hideVictoryScreen() {
+  victoryActive = false;
+  if (victoryOverlayEl) victoryOverlayEl.style.display = 'none';
+}
+
+if (restartMatchBtn) {
+  restartMatchBtn.addEventListener('click', () => {
+    sfx.init();
+    hideVictoryScreen();
+    sendWs({ type: 'restart_match' });
+    canvas.requestPointerLock();
+  });
+}
+
+if (victoryLobbyBtn) {
+  victoryLobbyBtn.addEventListener('click', () => {
+    hideVictoryScreen();
+    lobbyOverlay.style.display = 'flex';
+  });
+}
+
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;
-  lobbyOverlay.style.display = pointerLocked ? 'none' : 'flex';
+  if (!victoryActive) {
+    lobbyOverlay.style.display = pointerLocked ? 'none' : 'flex';
+  }
   if (!pointerLocked) {
     myState.firing = false;
     myState.ads = false;
@@ -698,6 +944,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyC') myState.crouch = !myState.crouch;
   if (e.code === 'KeyV') setCameraPerspective(!myState.tpp);
   if (e.code === 'KeyR') triggerReload();
+  if (e.code === 'KeyG') tryThrow('GRENADE');
+  if (e.code === 'KeyF') tryThrow('FLASH');
   if (e.code === 'Digit1') selectWeapon('M416');
   if (e.code === 'Digit2') selectWeapon('AKM');
   if (e.code === 'Digit3') selectWeapon('AWM');
@@ -837,6 +1085,31 @@ function tryShoot() {
   }
 }
 
+function tryThrow(kind) {
+  if (!pointerLocked || myState.dead) return;
+  const now = performance.now();
+  if (now - myState.lastThrowAt < 450) return;
+  if (kind === 'GRENADE' && myState.grenades <= 0) return;
+  if (kind === 'FLASH' && myState.flashes <= 0) return;
+
+  myState.lastThrowAt = now;
+  if (kind === 'GRENADE') myState.grenades = Math.max(0, myState.grenades - 1);
+  else myState.flashes = Math.max(0, myState.flashes - 1);
+  updateBottomHud();
+
+  const dir = new THREE.Vector3(0, 0, -1)
+    .applyEuler(new THREE.Euler(myState.pitch, myState.yaw, 0, 'YXZ'))
+    .normalize();
+  const eyeY = myState.y + (myState.crouch ? ARENA.crouchEye : ARENA.standEye);
+
+  sendWs({
+    type: 'throw',
+    kind,
+    origin: { x: myState.x, y: eyeY, z: myState.z },
+    dir: { x: dir.x, y: dir.y, z: dir.z }
+  });
+}
+
 // --- WEBSOCKET CONNECTION (+ CLOUDFLARE TUNNEL BRIDGE FOR NETLIFY) ---
 const ACTIVE_TUNNEL_HOST = 'executives-firms-subsidiary-performs.trycloudflare.com';
 const customServer = urlParams.get('server');
@@ -860,6 +1133,28 @@ function sendWs(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(obj));
   }
+}
+
+function triggerLocalDeath(killerName, weapon, headshot, killerId) {
+  myState.dead = true;
+  myState.hp = 0;
+  myState.firing = false;
+  myState.ads = false;
+  myState.reloading = false;
+  myState.diedAt = performance.now();
+  myState.killerId = killerId || null;
+  sniperScopeEl.style.display = 'none';
+  crosshairEl.style.display = 'none';
+  fpGunGroup.visible = false;
+
+  if (deathKillerInfoEl) {
+    const hsTag = headshot ? ' <span style="color:#ef4444;font-weight:900">• HEADSHOT</span>' : '';
+    const byText = killerName ? `Killed by <b style="color:#f2b722">${killerName}</b> [${weapon || 'AR'}]` : 'Eliminated in combat';
+    deathKillerInfoEl.innerHTML = `${byText}${hsTag}`;
+  }
+  if (deathOverlayEl) deathOverlayEl.style.display = 'flex';
+  sfx.playDeath();
+  updateBottomHud();
 }
 
 function handleServerMessage(msg) {
@@ -899,16 +1194,43 @@ function handleServerMessage(msg) {
     myState.vz = 0;
     myState.yaw = msg.yaw;
     myState.pitch = 0;
-    myState.hp = msg.hp;
-    myState.ammo = msg.ammo;
+    myState.crouch = false;
+    myState.ads = false;
+    myState.firing = false;
+    myState.reloading = false;
+    myState.hp = msg.hp || 100;
+    myState.ammo = msg.ammo || WEAPONS[myState.weapon].magSize;
+    myState.grenades = msg.grenades ?? 2;
+    myState.flashes = msg.flashes ?? 2;
+    myState.flashAlpha = 0;
+    if (flashbangOverlayEl) flashbangOverlayEl.style.opacity = '0';
     myState.dead = false;
+    myState.killerId = null;
     if (msg.team) myState.team = msg.team;
+
+    camera.rotation.z = 0;
+    camera.position.set(myState.x, myState.y + ARENA.standEye, myState.z);
+    if (deathOverlayEl) deathOverlayEl.style.display = 'none';
+    crosshairEl.style.display = 'block';
+    sfx.playRespawn();
+    damageVignetteEl.style.boxShadow = 'inset 0 0 95px rgba(56, 189, 248, 0.55)';
+    clearTimeout(damageVignetteEl._t);
+    damageVignetteEl._t = setTimeout(() => {
+      damageVignetteEl.style.boxShadow = 'inset 0 0 110px rgba(220, 38, 38, 0)';
+    }, 450);
+    showCenterBanner('DEPLOYED • SPAWN SHIELD ACTIVE', 1600);
+    updateBottomHud();
   } else if (msg.type === 'state') {
     if (msg.room) currentRoom = cleanRoomCode(msg.room);
     if (msg.rooms) renderRoomList(msg.rooms);
     currentMode = msg.mode;
     targetScore = msg.targetScore;
     latestPlayers = msg.players;
+    if (msg.ended && !victoryActive) {
+      showVictoryScreen(msg);
+    } else if (!msg.ended && victoryActive) {
+      hideVictoryScreen();
+    }
 
     // Update top HUD
     const mins = String(Math.floor(msg.remainingSec / 60)).padStart(2, '0');
@@ -943,12 +1265,17 @@ function handleServerMessage(msg) {
     for (const p of msg.players) {
       seenIds.add(p.id);
       if (p.id === myState.id) {
+        if (p.dead && !myState.dead) {
+          triggerLocalDeath(null, null, false, null);
+        }
         myState.hp = p.hp;
         myState.dead = p.dead;
         myState.team = p.team;
         myState.invuln = p.invuln;
         myState.reloading = p.reloading;
-        if (!myState.firing) myState.ammo = p.ammo;
+        if (!myState.firing && !myState.dead) myState.ammo = p.ammo;
+        if (typeof p.grenades === 'number') myState.grenades = p.grenades;
+        if (typeof p.flashes === 'number') myState.flashes = p.flashes;
         updateBottomHud();
         continue;
       }
@@ -964,8 +1291,9 @@ function handleServerMessage(msg) {
       }
       av.chestBand.material.color.setHex(teamColor);
       av.helmet.material.color.setHex(teamColor);
-      av.group.visible = !p.dead;
-      av.shieldRing.visible = Boolean(p.invuln);
+      av.dead = Boolean(p.dead);
+      av.group.visible = true;
+      av.shieldRing.visible = Boolean(p.invuln) && !p.dead;
       av.targetPos.set(p.x, p.y, p.z);
       av.targetYaw = p.yaw;
       av.targetPitch = p.pitch;
@@ -1017,10 +1345,33 @@ function handleServerMessage(msg) {
     }, 320);
   } else if (msg.type === 'kill') {
     addKillfeedItem(msg);
+    if (msg.victimId === myState.id) {
+      triggerLocalDeath(msg.killerName, msg.weapon, msg.headshot, msg.killerId);
+    }
   } else if (msg.type === 'match_end') {
-    showCenterBanner(msg.winnerText, 5500);
+    showVictoryScreen(msg);
   } else if (msg.type === 'match_reset') {
+    hideVictoryScreen();
     showCenterBanner(`NEW ${msg.mode} MATCH STARTED!`, 2500);
+  } else if (msg.type === 'throw_spawn') {
+    spawnThrowableMesh(msg);
+    sfx.playThrow();
+  } else if (msg.type === 'throw_explode') {
+    const th = activeThrowables.get(msg.id);
+    if (th) {
+      scene.remove(th.mesh);
+      activeThrowables.delete(msg.id);
+    }
+    spawnExplosionEffect(msg.kind, msg.x, msg.y, msg.z);
+    const dist = Math.hypot(msg.x - myState.x, msg.z - myState.z);
+    sfx.playExplosion(msg.kind, dist);
+  } else if (msg.type === 'flashed') {
+    const intensity = Math.min(1, Math.max(0.2, Number(msg.intensity) || 0.85));
+    const durSec = Math.max(0.4, (Number(msg.durationMs) || 2200) / 1000);
+    myState.flashAlpha = Math.max(myState.flashAlpha, intensity);
+    myState.flashDecay = intensity / durSec;
+    if (flashbangOverlayEl) flashbangOverlayEl.style.opacity = String(Math.min(1, myState.flashAlpha * 1.15));
+    sfx.playFlashTinnitus(msg.durationMs || 2200);
   }
 }
 
@@ -1043,12 +1394,14 @@ function startLocalFallback() {
 
   const me = {
     id: 'local_p1', name: myState.name, team: 'BLUE', isBot: false,
-    weapon: 'M416', ammo: 30, reloadUntil: 0, lastShotAt: 0,
+    weapon: 'M416', ammo: 30, grenades: 2, flashes: 2, reloadUntil: 0, lastShotAt: 0,
     x: -5, y: 0, z: -51, vx: 0, vy: 0, vz: 0, yaw: Math.PI, pitch: 0,
     crouch: false, ads: false, hp: 100, dead: false, kills: 0, deaths: 0, streak: 0,
     invulnUntil: Date.now() + 2500, lastDamagedAt: Date.now()
   };
   players.set(me.id, me);
+  const localThrowables = [];
+  let localThrowSeq = 1;
 
   const sendToPlayer = (targetId, msg) => {
     if (targetId === me.id) handleServerMessage(msg);
@@ -1129,8 +1482,30 @@ function startLocalFallback() {
           victimId: hitTarget.id, victimName: hitTarget.name, victimTeam: hitTarget.team,
           weapon: wep.name, headshot: hs, streak: shooter.streak, scores
         });
+        const target = mode === 'FFA' ? 20 : 40;
+        if ((mode === 'TEAM' && (scores.BLUE >= target || scores.RED >= target)) || (mode === 'FFA' && shooter.kills >= target)) {
+          const winnerText = mode === 'TEAM'
+            ? (scores.BLUE >= target ? 'BLUE TEAM VICTORY!' : 'RED TEAM VICTORY!')
+            : `${shooter.name} WINS FREE-FOR-ALL!`;
+          broadcastRoom({
+            type: 'match_end', winnerText, mode, scores,
+            players: [...players.values()]
+          });
+        }
       }
     }
+  };
+
+  const resetLocalMatch = (newMode = mode) => {
+    mode = newMode;
+    scores.BLUE = 0;
+    scores.RED = 0;
+    for (const p of players.values()) {
+      p.kills = 0; p.deaths = 0; p.streak = 0; p.hp = 100; p.dead = false;
+      const sp = pickSpawn(p.team);
+      p.x = sp.x; p.y = sp.y; p.z = sp.z; p.yaw = sp.yaw;
+    }
+    broadcastRoom({ type: 'match_reset', mode, scores, targetScore: mode === 'FFA' ? 20 : 40 });
   };
 
   const applyPlayerAction = (actor, m) => {
@@ -1143,12 +1518,38 @@ function startLocalFallback() {
       actor.x = m.x; actor.y = m.y; actor.z = m.z; actor.yaw = m.yaw; actor.pitch = m.pitch; actor.crouch = m.crouch;
     } else if (m.type === 'shoot') {
       fireShot(actor, m.origin, m.dir);
+    } else if (m.type === 'throw') {
+      const kind = m.kind === 'FLASH' ? 'FLASH' : 'GRENADE';
+      const spec = THROWABLES[kind];
+      if (!actor.dead && spec) {
+        actor.grenades = actor.grenades ?? 2;
+        actor.flashes = actor.flashes ?? 2;
+        if ((kind === 'GRENADE' && actor.grenades > 0) || (kind === 'FLASH' && actor.flashes > 0)) {
+          if (kind === 'GRENADE') actor.grenades--;
+          else actor.flashes--;
+          const d = m.dir || { x: 0, y: 0, z: -1 };
+          const dl = Math.hypot(d.x, d.y, d.z) || 1;
+          const ox = m.origin?.x ?? actor.x;
+          const oy = m.origin?.y ?? actor.y + 1.5;
+          const oz = m.origin?.z ?? actor.z;
+          const th = {
+            id: `lth_${localThrowSeq++}`, ownerId: actor.id, ownerTeam: actor.team, kind,
+            x: ox + (d.x / dl) * 0.5, y: oy, z: oz + (d.z / dl) * 0.5,
+            vx: (d.x / dl) * spec.speed, vy: (d.y / dl) * spec.speed + spec.upBoost, vz: (d.z / dl) * spec.speed,
+            explodeAt: Date.now() + spec.fuseMs
+          };
+          localThrowables.push(th);
+          broadcastRoom({ type: 'throw_spawn', id: th.id, kind, x: th.x, y: th.y, z: th.z, vx: th.vx, vy: th.vy, vz: th.vz, fuseMs: spec.fuseMs });
+        }
+      }
     } else if (m.type === 'reload') {
       actor.reloadUntil = Date.now() + (WEAPONS[actor.weapon]?.reloadMs || 1800);
     } else if (m.type === 'weapon' && WEAPONS[m.weapon]) {
       actor.weapon = m.weapon; actor.ammo = WEAPONS[m.weapon].magSize; actor.reloadUntil = 0;
     } else if (m.type === 'set_mode') {
-      mode = m.mode; scores.BLUE = 0; scores.RED = 0;
+      resetLocalMatch(m.mode);
+    } else if (m.type === 'restart_match') {
+      resetLocalMatch(mode);
     } else if (m.type === 'bot') {
       if (m.action === 'add') addBot();
       else {
@@ -1248,12 +1649,51 @@ function startLocalFallback() {
   setInterval(() => {
     if (isP2PClient) return;
     const now = Date.now();
+    for (let i = localThrowables.length - 1; i >= 0; i--) {
+      const th = localThrowables[i];
+      stepThrowablePhysics(th, 0.04, MAP_BOXES);
+      if (now >= th.explodeAt) {
+        localThrowables.splice(i, 1);
+        const spec = THROWABLES[th.kind] || THROWABLES.GRENADE;
+        broadcastRoom({ type: 'throw_explode', id: th.id, kind: th.kind, x: +th.x.toFixed(2), y: +th.y.toFixed(2), z: +th.z.toFixed(2) });
+        const owner = players.get(th.ownerId);
+        for (const t of players.values()) {
+          if (t.dead) continue;
+          const dist = Math.hypot(t.x - th.x, t.y + 0.9 - th.y, t.z - th.z);
+          if (dist > spec.radius) continue;
+          if (th.kind === 'FLASH') {
+            const intensity = Math.max(0.25, 1 - (dist / spec.radius) * 0.75);
+            sendToPlayer(t.id, { type: 'flashed', durationMs: Math.round(spec.maxDurationMs * intensity), intensity: +intensity.toFixed(2) });
+          } else {
+            if (mode === 'TEAM' && t.team === th.ownerTeam && t.id !== th.ownerId) continue;
+            const dmg = Math.max(10, Math.round(spec.maxDamage * (1 - dist / spec.radius)));
+            t.hp = Math.max(0, t.hp - dmg);
+            t.lastDamagedAt = now;
+            const killed = t.hp <= 0;
+            if (owner && owner.id !== t.id) sendToPlayer(owner.id, { type: 'hitmarker', dmg, headshot: false, killed });
+            sendToPlayer(t.id, { type: 'damaged', dmg, hp: t.hp });
+            if (killed) {
+              t.dead = true; t.deaths++; t.streak = 0; t.respawnAt = now + 3000;
+              if (owner && owner.id !== t.id) {
+                owner.kills++; owner.streak++;
+                if (mode === 'TEAM') scores[owner.team] = (scores[owner.team] || 0) + 1;
+              }
+              broadcastRoom({
+                type: 'kill', killerId: owner ? owner.id : th.ownerId, killerName: owner ? owner.name : 'GRENADE',
+                killerTeam: th.ownerTeam, victimId: t.id, victimName: t.name, victimTeam: t.team,
+                weapon: 'FRAG GRENADE', headshot: false, streak: owner ? owner.streak : 1, scores
+              });
+            }
+          }
+        }
+      }
+    }
     for (const p of players.values()) {
       if (p.dead && now >= p.respawnAt) {
         const sp = pickSpawn(p.team);
         p.x = sp.x; p.y = sp.y; p.z = sp.z; p.yaw = sp.yaw; p.hp = 100; p.dead = false;
-        p.ammo = WEAPONS[p.weapon].magSize;
-        sendToPlayer(p.id, { type: 'respawn', room: currentRoom, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: 100, ammo: p.ammo });
+        p.ammo = WEAPONS[p.weapon].magSize; p.grenades = 2; p.flashes = 2;
+        sendToPlayer(p.id, { type: 'respawn', room: currentRoom, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: 100, ammo: p.ammo, grenades: 2, flashes: 2 });
       }
       if (!p.dead && p.reloadUntil > 0 && now >= p.reloadUntil) {
         p.reloadUntil = 0; p.ammo = WEAPONS[p.weapon].magSize;
@@ -1297,7 +1737,7 @@ function startLocalFallback() {
         id: p.id, name: p.name, team: p.team, isBot: p.isBot,
         x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2),
         yaw: +p.yaw.toFixed(3), pitch: +p.pitch.toFixed(3), crouch: p.crouch,
-        weapon: p.weapon, ammo: p.ammo, reloading: p.reloadUntil > now,
+        weapon: p.weapon, ammo: p.ammo, grenades: p.grenades ?? 2, flashes: p.flashes ?? 2, reloading: p.reloadUntil > now,
         hp: Math.ceil(p.hp), dead: p.dead, invuln: false,
         kills: p.kills, deaths: p.deaths, streak: p.streak
       }))
@@ -1339,6 +1779,8 @@ function updateBottomHud() {
   }
 
   ammoCountEl.textContent = myState.reloading ? 'RLD' : String(myState.ammo);
+  if (nadeCountEl) nadeCountEl.textContent = String(myState.grenades ?? 2);
+  if (flashCountEl) flashCountEl.textContent = String(myState.flashes ?? 2);
 }
 
 function renderScoreboard() {
@@ -1501,12 +1943,46 @@ function animate(now) {
     const targetGunY = (myState.reloading ? -0.34 : myState.ads ? -0.091 : -0.2) + gunBobY;
     const targetGunZ = (myState.ads ? -0.32 : -0.4) + myState.recoilKick;
 
+    camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, 0, dt * 12);
+    localAvatar.group.rotation.x = 0;
+
     fpGunGroup.position.x = THREE.MathUtils.lerp(fpGunGroup.position.x, targetGunX, dt * 20);
     fpGunGroup.position.y = THREE.MathUtils.lerp(fpGunGroup.position.y, targetGunY, dt * 18);
     fpGunGroup.position.z = THREE.MathUtils.lerp(fpGunGroup.position.z, targetGunZ, dt * 26);
     fpGunGroup.rotation.x = myState.reloading ? 0.42 : myState.ads ? 0 : myState.recoilKick * 0.25;
   } else {
-    localAvatar.group.visible = false;
+    // Death-cam & 3s respawn countdown feedback
+    fpGunGroup.visible = false;
+    sniperScopeEl.style.display = 'none';
+    crosshairEl.style.display = 'none';
+
+    const elapsedMs = Math.max(0, now - (myState.diedAt || now));
+    const remSec = Math.max(0, (3000 - elapsedMs) / 1000);
+    if (deathTimerTextEl) deathTimerTextEl.textContent = `RESPAWNING IN ${remSec.toFixed(1)}s`;
+    if (deathBarFillEl) deathBarFillEl.style.width = `${Math.min(100, (elapsedMs / 3000) * 100)}%`;
+
+    // Pan death-cam toward killer & tilt to ground
+    const killerAv = myState.killerId ? remoteAvatars.get(myState.killerId) : null;
+    if (killerAv) {
+      const dx = killerAv.group.position.x - myState.x;
+      const dz = killerAv.group.position.z - myState.z;
+      const targetYaw = Math.atan2(-dx, -dz);
+      camera.rotation.y = THREE.MathUtils.lerp(camera.rotation.y, targetYaw, dt * 4);
+    }
+    camera.position.y = THREE.MathUtils.lerp(camera.position.y, myState.y + 0.35, dt * 6);
+    camera.rotation.x = THREE.MathUtils.lerp(camera.rotation.x, 0.12, dt * 5);
+    camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, 0.42, dt * 6);
+
+    if (myState.tpp) {
+      localAvatar.group.visible = true;
+      localAvatar.group.rotation.x = THREE.MathUtils.lerp(
+        localAvatar.group.rotation.x,
+        -Math.PI / 2,
+        dt * 10
+      );
+    } else {
+      localAvatar.group.visible = false;
+    }
   }
 
   if (muzzleFlashMesh && muzzleFlashMesh.material.opacity > 0) {
@@ -1528,7 +2004,7 @@ function animate(now) {
     });
   }
 
-  // Interpolate remote player avatars
+  // Interpolate remote player avatars (+ ragdoll collapse on death)
   for (const av of remoteAvatars.values()) {
     const distMove = Math.hypot(
       av.targetPos.x - av.group.position.x,
@@ -1538,6 +2014,11 @@ function animate(now) {
     av.group.rotation.y = av.targetYaw;
     av.armGroup.rotation.x = av.targetPitch;
     av.group.scale.y = THREE.MathUtils.lerp(av.group.scale.y, av.crouch ? 0.68 : 1.0, dt * 14);
+    av.group.rotation.x = THREE.MathUtils.lerp(
+      av.group.rotation.x,
+      av.dead ? -Math.PI / 2 : 0,
+      dt * 12
+    );
 
     if (distMove > 0.015) {
       av.walkPhase += dt * 14;
@@ -1561,6 +2042,39 @@ function animate(now) {
       activeEffects.splice(i, 1);
     } else {
       fx.line.material.opacity = 1 - age / fx.ttl;
+    }
+  }
+
+  // Step active grenades & flashbangs in 3D space
+  for (const th of activeThrowables.values()) {
+    stepThrowablePhysics(th, dt, MAP_BOXES);
+    th.mesh.position.set(th.x, th.y, th.z);
+    th.mesh.rotation.x += dt * 9;
+    th.mesh.rotation.z += dt * 6;
+  }
+
+  // Update explosion spheres
+  for (let i = activeExplosions.length - 1; i >= 0; i--) {
+    const ex = activeExplosions[i];
+    const age = now - ex.born;
+    if (age >= ex.ttl) {
+      scene.remove(ex.mesh);
+      ex.mesh.geometry.dispose();
+      ex.mesh.material.dispose();
+      activeExplosions.splice(i, 1);
+    } else {
+      const t = age / ex.ttl;
+      const sc = 0.4 + t * ex.maxScale;
+      ex.mesh.scale.set(sc, sc, sc);
+      ex.mesh.material.opacity = 0.85 * (1 - t);
+    }
+  }
+
+  // Decay flashbang screen blind overlay
+  if (myState.flashAlpha > 0) {
+    myState.flashAlpha = Math.max(0, myState.flashAlpha - myState.flashDecay * dt);
+    if (flashbangOverlayEl) {
+      flashbangOverlayEl.style.opacity = String(Math.min(1, myState.flashAlpha * 1.15));
     }
   }
 

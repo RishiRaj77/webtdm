@@ -7,11 +7,13 @@ import { WebSocketServer } from 'ws';
 import {
   ARENA,
   WEAPONS,
+  THROWABLES,
   MAP_BOXES,
   SPAWN_POINTS,
   rayBoxIntersect,
   raycastMap,
-  resolvePlayerPhysics
+  resolvePlayerPhysics,
+  stepThrowablePhysics
 } from './public/shared.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -153,6 +155,8 @@ export function createGameServer() {
       p.lastDamagedAt = Date.now();
       const wep = WEAPONS[p.weapon] || WEAPONS.M416;
       p.ammo = wep.magSize;
+      p.grenades = THROWABLES.GRENADE.maxCount;
+      p.flashes = THROWABLES.FLASH.maxCount;
       p.reloadUntil = 0;
     }
 
@@ -193,6 +197,20 @@ export function createGameServer() {
       });
     }
 
+    function getStandings() {
+      return [...players.values()]
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          team: p.team,
+          weapon: p.weapon,
+          kills: p.kills,
+          deaths: p.deaths,
+          streak: p.streak
+        }))
+        .sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+    }
+
     function checkMatchWin() {
       if (match.ended) return;
       const target = match.targetScore[match.mode];
@@ -201,16 +219,28 @@ export function createGameServer() {
           match.ended = true;
           match.winnerText =
             match.scores.BLUE >= target ? 'BLUE TEAM VICTORY!' : 'RED TEAM VICTORY!';
-          match.resetAt = Date.now() + 6000;
-          broadcast({ type: 'match_end', winnerText: match.winnerText, scores: match.scores });
+          match.resetAt = Date.now() + 18000;
+          broadcast({
+            type: 'match_end',
+            winnerText: match.winnerText,
+            mode: match.mode,
+            scores: match.scores,
+            players: getStandings()
+          });
         }
       } else {
         for (const p of players.values()) {
           if (p.kills >= target) {
             match.ended = true;
             match.winnerText = `${p.name} WINS FREE-FOR-ALL!`;
-            match.resetAt = Date.now() + 6000;
-            broadcast({ type: 'match_end', winnerText: match.winnerText, scores: match.scores });
+            match.resetAt = Date.now() + 18000;
+            broadcast({
+              type: 'match_end',
+              winnerText: match.winnerText,
+              mode: match.mode,
+              scores: match.scores,
+              players: getStandings()
+            });
             break;
           }
         }
@@ -386,6 +416,189 @@ export function createGameServer() {
       });
     }
 
+    const throwables = [];
+
+    function handleThrow(thrower, kind, origin, dir) {
+      if (thrower.dead || match.ended) return;
+      const cfg = THROWABLES[kind];
+      if (!cfg) return;
+      const now = Date.now();
+      if (now - (thrower.lastThrowAt || 0) < 500) return;
+
+      if (kind === 'GRENADE') {
+        if ((thrower.grenades || 0) <= 0) return;
+        thrower.grenades--;
+      } else if (kind === 'FLASH') {
+        if ((thrower.flashes || 0) <= 0) return;
+        thrower.flashes--;
+      }
+
+      thrower.lastThrowAt = now;
+      thrower.invulnUntil = 0;
+
+      const eyeY = thrower.y + (thrower.crouch ? ARENA.crouchEye : ARENA.standEye);
+      const ox = Math.abs(origin.x - thrower.x) < 2.2 ? origin.x : thrower.x;
+      const oy = Math.abs(origin.y - eyeY) < 2.2 ? origin.y : eyeY;
+      const oz = Math.abs(origin.z - thrower.z) < 2.2 ? origin.z : thrower.z;
+
+      const len = Math.hypot(dir.x, dir.y, dir.z) || 1;
+      const nx = dir.x / len;
+      const ny = dir.y / len;
+      const nz = dir.z / len;
+
+      const proj = {
+        id: `th_${nextId++}`,
+        kind,
+        ownerId: thrower.id,
+        ownerName: thrower.name,
+        ownerTeam: thrower.team,
+        x: ox + nx * 0.45,
+        y: Math.max(0.2, oy - 0.1),
+        z: oz + nz * 0.45,
+        vx: nx * cfg.speed,
+        vy: ny * cfg.speed + cfg.upBoost,
+        vz: nz * cfg.speed,
+        detonateAt: now + cfg.fuseMs
+      };
+      throwables.push(proj);
+
+      broadcast({
+        type: 'throw_spawn',
+        id: proj.id,
+        kind: proj.kind,
+        ownerId: proj.ownerId,
+        x: +proj.x.toFixed(2),
+        y: +proj.y.toFixed(2),
+        z: +proj.z.toFixed(2),
+        vx: +proj.vx.toFixed(2),
+        vy: +proj.vy.toFixed(2),
+        vz: +proj.vz.toFixed(2),
+        fuseMs: cfg.fuseMs
+      });
+    }
+
+    function detonateThrowable(proj, now) {
+      const cfg = THROWABLES[proj.kind];
+      broadcast({
+        type: 'throw_explode',
+        id: proj.id,
+        kind: proj.kind,
+        x: +proj.x.toFixed(2),
+        y: +proj.y.toFixed(2),
+        z: +proj.z.toFixed(2)
+      });
+
+      const blastOrigin = { x: proj.x, y: proj.y + 0.25, z: proj.z };
+      const owner = players.get(proj.ownerId);
+
+      if (proj.kind === 'GRENADE') {
+        for (const target of players.values()) {
+          if (target.dead) continue;
+          if (
+            match.mode === 'TEAM' &&
+            target.team === proj.ownerTeam &&
+            target.id !== proj.ownerId
+          ) {
+            continue;
+          }
+          if (target.invulnUntil > now) continue;
+
+          const tx = target.x - blastOrigin.x;
+          const ty = target.y + 0.9 - blastOrigin.y;
+          const tz = target.z - blastOrigin.z;
+          const dist = Math.hypot(tx, ty, tz);
+          if (dist > cfg.radius) continue;
+
+          const dir = { x: tx / (dist || 1), y: ty / (dist || 1), z: tz / (dist || 1) };
+          const wall = raycastMap(blastOrigin, dir, dist, MAP_BOXES);
+          const wallFactor = wall && wall.dist < dist - 0.35 ? 0.3 : 1.0;
+
+          const dmg = Math.round(cfg.maxDamage * (1 - dist / cfg.radius) * wallFactor);
+          if (dmg <= 0) continue;
+
+          target.hp = Math.max(0, target.hp - dmg);
+          target.lastDamagedAt = now;
+          const killed = target.hp <= 0;
+
+          if (owner && owner.ws && owner.ws.readyState === 1 && target.id !== owner.id) {
+            owner.ws.send(JSON.stringify({ type: 'hitmarker', dmg, headshot: false, killed }));
+          }
+          if (target.ws && target.ws.readyState === 1) {
+            target.ws.send(
+              JSON.stringify({
+                type: 'damaged',
+                fromX: proj.x,
+                fromZ: proj.z,
+                dmg,
+                hp: target.hp
+              })
+            );
+          }
+
+          if (killed) {
+            target.dead = true;
+            target.deaths++;
+            target.streak = 0;
+            target.respawnAt = now + 3000;
+
+            if (owner && target.id !== owner.id) {
+              owner.kills++;
+              owner.streak++;
+              if (match.mode === 'TEAM') {
+                match.scores[proj.ownerTeam] = (match.scores[proj.ownerTeam] || 0) + 1;
+              }
+            }
+
+            broadcast({
+              type: 'kill',
+              killerId: proj.ownerId,
+              killerName: proj.ownerName,
+              killerTeam: proj.ownerTeam,
+              victimId: target.id,
+              victimName: target.name,
+              victimTeam: target.team,
+              weapon: 'Frag Grenade',
+              headshot: false,
+              streak: owner ? owner.streak : 1,
+              scores: match.scores
+            });
+            checkMatchWin();
+          }
+        }
+      } else if (proj.kind === 'FLASH') {
+        for (const target of players.values()) {
+          if (target.dead) continue;
+          const tx = target.x - blastOrigin.x;
+          const ty = target.y + 1.4 - blastOrigin.y;
+          const tz = target.z - blastOrigin.z;
+          const dist = Math.hypot(tx, ty, tz);
+          if (dist > cfg.radius) continue;
+
+          const dir = { x: tx / (dist || 1), y: ty / (dist || 1), z: tz / (dist || 1) };
+          const wall = raycastMap(blastOrigin, dir, dist, MAP_BOXES);
+          if (wall && wall.dist < dist - 0.35) continue;
+
+          const intensity = Math.max(0.28, 1 - dist / cfg.radius);
+          const durationMs = Math.round(cfg.maxDurationMs * intensity);
+
+          if (target.isBot) {
+            target.blindedUntil = now + durationMs;
+          } else if (target.ws && target.ws.readyState === 1) {
+            target.ws.send(
+              JSON.stringify({
+                type: 'flashed',
+                intensity: +intensity.toFixed(2),
+                durationMs
+              })
+            );
+          }
+          if (owner && owner.ws && owner.ws.readyState === 1 && target.id !== owner.id) {
+            owner.ws.send(JSON.stringify({ type: 'hitmarker', shield: true }));
+          }
+        }
+      }
+    }
+
     function addBot() {
       const botCount = [...players.values()].filter((p) => p.isBot).length;
       if (botCount >= 10) return null;
@@ -494,7 +707,7 @@ export function createGameServer() {
           bot.aiNextGoalAt = 0;
         }
 
-        if (bestEnemy) {
+        if (bestEnemy && (!bot.blindedUntil || now >= bot.blindedUntil)) {
           const dx = bestEnemy.x - bot.x;
           const dy = bestEnemy.y + (bestEnemy.crouch ? 0.75 : 1.2) - eyeOrigin.y;
           const dz = bestEnemy.z - bot.z;
@@ -539,11 +752,27 @@ export function createGameServer() {
           const top = [...players.values()].sort((a, b) => b.kills - a.kills)[0];
           match.winnerText = top ? `${top.name} WINS ON TIME!` : 'MATCH OVER!';
         }
-        match.resetAt = now + 6000;
-        broadcast({ type: 'match_end', winnerText: match.winnerText, scores: match.scores });
+        match.resetAt = now + 18000;
+        broadcast({
+          type: 'match_end',
+          winnerText: match.winnerText,
+          mode: match.mode,
+          scores: match.scores,
+          players: getStandings()
+        });
       }
 
       updateBots(now, dt);
+
+      // Update active grenades & flashbangs
+      for (let i = throwables.length - 1; i >= 0; i--) {
+        const proj = throwables[i];
+        stepThrowablePhysics(proj, dt, MAP_BOXES);
+        if (now >= proj.detonateAt) {
+          throwables.splice(i, 1);
+          detonateThrowable(proj, now);
+        }
+      }
 
       for (const p of players.values()) {
         if (p.dead && now >= p.respawnAt) {
@@ -557,7 +786,9 @@ export function createGameServer() {
                 z: p.z,
                 yaw: p.yaw,
                 hp: p.hp,
-                ammo: p.ammo
+                ammo: p.ammo,
+                grenades: p.grenades,
+                flashes: p.flashes
               })
             );
           }
@@ -588,6 +819,8 @@ export function createGameServer() {
           crouch: Boolean(p.crouch),
           weapon: p.weapon,
           ammo: p.ammo,
+          grenades: p.grenades ?? 2,
+          flashes: p.flashes ?? 2,
           reloading: p.reloadUntil > now,
           hp: Math.ceil(p.hp),
           dead: p.dead,
@@ -620,6 +853,7 @@ export function createGameServer() {
       respawnPlayer,
       resetMatch,
       handleShot,
+      handleThrow,
       addBot,
       removeBot,
       tick
@@ -808,6 +1042,8 @@ export function createGameServer() {
             yaw: player.yaw,
             hp: player.hp,
             ammo: player.ammo,
+            grenades: player.grenades,
+            flashes: player.flashes,
             team: player.team
           })
         );
@@ -835,6 +1071,20 @@ export function createGameServer() {
         ) {
           curRoom.handleShot(player, msg.origin, msg.dir);
         }
+      } else if (msg.type === 'throw') {
+        if (
+          (msg.kind === 'GRENADE' || msg.kind === 'FLASH') &&
+          msg.origin &&
+          msg.dir &&
+          Number.isFinite(msg.origin.x) &&
+          Number.isFinite(msg.origin.y) &&
+          Number.isFinite(msg.origin.z) &&
+          Number.isFinite(msg.dir.x) &&
+          Number.isFinite(msg.dir.y) &&
+          Number.isFinite(msg.dir.z)
+        ) {
+          curRoom.handleThrow(player, msg.kind, msg.origin, msg.dir);
+        }
       } else if (msg.type === 'reload') {
         const wep = WEAPONS[player.weapon] || WEAPONS.M416;
         if (!player.dead && player.reloadUntil <= Date.now() && player.ammo < wep.magSize) {
@@ -850,6 +1100,8 @@ export function createGameServer() {
         if (msg.mode === 'TEAM' || msg.mode === 'FFA') {
           curRoom.resetMatch(msg.mode);
         }
+      } else if (msg.type === 'restart_match') {
+        curRoom.resetMatch(curRoom.match.mode);
       } else if (msg.type === 'bot') {
         if (msg.action === 'add') curRoom.addBot();
         else if (msg.action === 'remove') curRoom.removeBot();

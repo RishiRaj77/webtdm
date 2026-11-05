@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { createGameServer } from './server.js';
-import { rayBoxIntersect, resolvePlayerPhysics, WEAPONS } from './public/shared.js';
+import { rayBoxIntersect, resolvePlayerPhysics, stepThrowablePhysics, THROWABLES, WEAPONS } from './public/shared.js';
 
 // 1. Ray-Box intersection check
 const box = { x: 0, y: 0, z: -10, w: 2, h: 2, d: 2 };
@@ -102,6 +102,30 @@ await new Promise((r) => setTimeout(r, 60));
 assert.equal(p1.kills, 2, 'Shooter should be credited with 2nd kill after headshot');
 assert.equal(match.scores.BLUE, 2, 'Blue team score should be 2');
 assert.equal(p2.dead, true, 'Target should be eliminated in 1 headshot');
+
+// Test restart_match resets kills and scores
+c1.ws.send(JSON.stringify({ type: 'restart_match' }));
+await new Promise((r) => setTimeout(r, 50));
+assert.equal(p1.kills, 0, 'restart_match should reset player kills');
+assert.equal(match.scores.BLUE, 0, 'restart_match should reset team score');
+
+// Test Grenade (G) and Flashbang (F) throw + physics
+assert.equal(p1.grenades, 2, 'Player should start with 2 grenades');
+assert.equal(p1.flashes, 2, 'Player should start with 2 flashbangs');
+const testProj = { x: 0, y: 1.5, z: 0, vx: 0, vy: 2, vz: -10 };
+stepThrowablePhysics(testProj, 0.1, []);
+assert.ok(testProj.z < 0, 'Throwable should advance along throw vector');
+
+c1.ws.send(JSON.stringify({ type: 'throw', kind: 'GRENADE', origin: { x: -37, y: 1.5, z: -5 }, dir: { x: 0, y: 0, z: 1 } }));
+await new Promise((r) => setTimeout(r, 50));
+assert.equal(p1.grenades, 1, 'Throwing GRENADE should decrement grenade count to 1');
+assert.ok(c1.msgs.some((m) => m.type === 'throw_spawn' && m.kind === 'GRENADE'), 'Clients should receive throw_spawn for GRENADE');
+
+p1.lastThrowAt = 0;
+c1.ws.send(JSON.stringify({ type: 'throw', kind: 'FLASH', origin: { x: -37, y: 1.5, z: -5 }, dir: { x: 0, y: 0, z: 1 } }));
+await new Promise((r) => setTimeout(r, 50));
+assert.equal(p1.flashes, 1, 'Throwing FLASH should decrement flashbang count to 1');
+assert.ok(c1.msgs.some((m) => m.type === 'throw_spawn' && m.kind === 'FLASH'), 'Clients should receive throw_spawn for FLASH');
 
 // Switch to FFA mode and test bots
 c1.ws.send(JSON.stringify({ type: 'set_mode', mode: 'FFA' }));
