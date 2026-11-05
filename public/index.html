@@ -436,10 +436,20 @@
 
       <div class="lan-box">
         <div>
-          <div class="lan-box-text">Share this LAN link with colleagues on your Wi-Fi / Ethernet:</div>
+          <div class="lan-box-text">Share Room Link with colleagues:</div>
           <div class="lan-box-url" id="lan-url-text">Connecting...</div>
         </div>
-        <button class="btn-small" id="copy-lan-btn" type="button">Copy URL</button>
+        <button class="btn-small" id="copy-lan-btn" type="button">Copy Link</button>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="room-input">Room Code (Create or Join)</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="text-input" id="room-input" maxlength="12" style="text-transform:uppercase;letter-spacing:1.5px;flex:1" placeholder="MAIN" />
+          <button class="btn-small" id="join-room-btn" type="button" style="padding:10px 14px;border-color:#f2b722;color:#f2b722">Join Room</button>
+          <button class="btn-small" id="new-room-btn" type="button" style="padding:10px 12px">+ New Room</button>
+        </div>
+        <div id="room-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
       </div>
 
       <div class="field-group">

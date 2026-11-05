@@ -471,6 +471,14 @@ const myState = {
   recoilKick: 0
 };
 
+function cleanRoomCode(raw) {
+  const s = String(raw || '').toUpperCase().replace(/[^A-Z0-9\-]/g, '').slice(0, 12);
+  return s || 'MAIN';
+}
+
+const urlParams = new URLSearchParams(window.location.search);
+let currentRoom = cleanRoomCode(urlParams.get('room') || 'MAIN');
+let baseLanOrigin = window.location.origin;
 let currentMode = 'TEAM';
 let targetScore = 40;
 let latestPlayers = [];
@@ -479,6 +487,10 @@ let pointerLocked = false;
 // --- DOM ELEMENTS ---
 const lobbyOverlay = document.getElementById('lobby-overlay');
 const nameInput = document.getElementById('name-input');
+const roomInput = document.getElementById('room-input');
+const joinRoomBtn = document.getElementById('join-room-btn');
+const newRoomBtn = document.getElementById('new-room-btn');
+const roomListEl = document.getElementById('room-list');
 const lanUrlText = document.getElementById('lan-url-text');
 const copyLanBtn = document.getElementById('copy-lan-btn');
 const deployBtn = document.getElementById('deploy-btn');
@@ -511,6 +523,63 @@ const scoreboardEl = document.getElementById('scoreboard');
 const sbBodyEl = document.getElementById('sb-body');
 
 nameInput.value = myState.name;
+roomInput.value = currentRoom;
+
+function updateRoomShareUrl() {
+  const newUrl = `${window.location.pathname}?room=${encodeURIComponent(currentRoom)}`;
+  window.history.replaceState(null, '', newUrl);
+  const cleanOrigin = baseLanOrigin.replace(/\s*\(.*\)$/, '');
+  lanUrlText.textContent = `${cleanOrigin}/?room=${currentRoom}`;
+}
+
+function renderRoomList(rooms) {
+  if (!roomListEl || !Array.isArray(rooms)) return;
+  roomListEl.innerHTML = rooms
+    .map((r) => {
+      const active = r.code === currentRoom;
+      const border = active ? '#f2b722' : 'rgba(255,255,255,0.18)';
+      const bg = active ? 'rgba(242,183,34,0.2)' : 'rgba(255,255,255,0.05)';
+      return `<button type="button" class="btn-small room-pill" data-room="${r.code}" style="border-color:${border};background:${bg}">
+        ${r.code} (${r.players} • ${r.mode})
+      </button>`;
+    })
+    .join('');
+  roomListEl.querySelectorAll('.room-pill').forEach((btn) => {
+    btn.addEventListener('click', () => switchRoom(btn.getAttribute('data-room')));
+  });
+}
+
+function switchRoom(rawCode) {
+  const code = cleanRoomCode(rawCode);
+  currentRoom = code;
+  roomInput.value = code;
+  updateRoomShareUrl();
+  // Clear old remote avatars from previous room
+  for (const [, av] of remoteAvatars.entries()) {
+    scene.remove(av.group);
+  }
+  remoteAvatars.clear();
+  sendWs({
+    type: 'join_room',
+    room: code,
+    name: nameInput.value.trim() || myState.name,
+    team: myState.preferredTeam,
+    weapon: myState.weapon,
+    mode: currentMode
+  });
+  showCenterBanner(`JOINED ROOM: ${code}`, 1800);
+}
+
+joinRoomBtn.addEventListener('click', () => switchRoom(roomInput.value));
+roomInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') switchRoom(roomInput.value);
+});
+newRoomBtn.addEventListener('click', () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  switchRoom(code);
+});
 
 // Segmented button handlers in Lobby
 function setupSegmented(containerId, attr, onSelect) {
@@ -545,7 +614,7 @@ remBotBtn.addEventListener('click', () => sendWs({ type: 'bot', action: 'remove'
 copyLanBtn.addEventListener('click', () => {
   navigator.clipboard?.writeText(lanUrlText.textContent || window.location.href);
   copyLanBtn.textContent = 'Copied!';
-  setTimeout(() => (copyLanBtn.textContent = 'Copy URL'), 1500);
+  setTimeout(() => (copyLanBtn.textContent = 'Copy Link'), 1500);
 });
 
 deployBtn.addEventListener('click', () => {
@@ -553,8 +622,12 @@ deployBtn.addEventListener('click', () => {
   const clean = nameInput.value.trim() || myState.name;
   myState.name = clean;
   localStorage.setItem('webtdm_name', clean);
+  currentRoom = cleanRoomCode(roomInput.value || currentRoom);
+  roomInput.value = currentRoom;
+  updateRoomShareUrl();
   sendWs({
     type: 'join',
+    room: currentRoom,
     name: clean,
     team: myState.preferredTeam,
     weapon: myState.weapon,
@@ -577,7 +650,7 @@ document.addEventListener('pointerlockchange', () => {
 // --- INPUT HANDLING ---
 const keys = {};
 window.addEventListener('keydown', (e) => {
-  if (document.activeElement === nameInput) return;
+  if (document.activeElement === nameInput || document.activeElement === roomInput) return;
   keys[e.code] = true;
 
   if (e.code === 'Tab') {
@@ -729,13 +802,13 @@ function tryShoot() {
   }
 }
 
-// --- WEBSOCKET CONNECTION (+ STATIC HOST / NETLIFY BOT FALLBACK) ---
+// --- WEBSOCKET CONNECTION (+ STATIC HOST / NETLIFY P2P ROOM FALLBACK) ---
 const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 let ws = null;
 let localFallback = null;
 
 try {
-  ws = new WebSocket(`${wsProto}//${window.location.host}`);
+  ws = new WebSocket(`${wsProto}//${window.location.host}/?room=${encodeURIComponent(currentRoom)}`);
 } catch {
   ws = null;
 }
@@ -758,14 +831,25 @@ function handleServerMessage(msg) {
     myState.y = msg.y;
     myState.z = msg.z;
     myState.yaw = msg.yaw;
+    if (msg.room) {
+      currentRoom = cleanRoomCode(msg.room);
+      roomInput.value = currentRoom;
+    }
+    if (msg.rooms) renderRoomList(msg.rooms);
     currentMode = msg.mode;
     targetScore = msg.targetScore;
     if (msg.lanUrls && msg.lanUrls.length) {
-      lanUrlText.textContent = msg.lanUrls[0];
+      baseLanOrigin = msg.lanUrls[0];
     } else {
-      lanUrlText.textContent = window.location.origin;
+      baseLanOrigin = window.location.origin;
     }
+    updateRoomShareUrl();
   } else if (msg.type === 'respawn') {
+    if (msg.room) {
+      currentRoom = cleanRoomCode(msg.room);
+      roomInput.value = currentRoom;
+      updateRoomShareUrl();
+    }
     myState.x = msg.x;
     myState.y = msg.y;
     myState.z = msg.z;
@@ -779,6 +863,8 @@ function handleServerMessage(msg) {
     myState.dead = false;
     if (msg.team) myState.team = msg.team;
   } else if (msg.type === 'state') {
+    if (msg.room) currentRoom = cleanRoomCode(msg.room);
+    if (msg.rooms) renderRoomList(msg.rooms);
     currentMode = msg.mode;
     targetScore = msg.targetScore;
     latestPlayers = msg.players;
@@ -787,7 +873,7 @@ function handleServerMessage(msg) {
     const mins = String(Math.floor(msg.remainingSec / 60)).padStart(2, '0');
     const secs = String(msg.remainingSec % 60).padStart(2, '0');
     timerTextEl.textContent = `${mins}:${secs}`;
-    modeBadgeEl.textContent = msg.mode === 'FFA' ? 'FREE FOR ALL' : 'TEAM TDM';
+    modeBadgeEl.textContent = `ROOM: ${currentRoom} • ${msg.mode === 'FFA' ? 'FFA' : 'TEAM'}`;
     targetTextEl.textContent = `FIRST TO ${msg.targetScore}`;
 
     if (msg.mode === 'TEAM') {
@@ -900,6 +986,10 @@ function handleServerMessage(msg) {
 function startLocalFallback() {
   if (localFallback) return;
   const players = new Map();
+  const peerConns = new Map();
+  let hostConn = null;
+  let activePeer = null;
+  let isP2PClient = false;
   let botSeq = 1;
   const scores = { BLUE: 0, RED: 0 };
   let mode = 'TEAM';
@@ -919,6 +1009,18 @@ function startLocalFallback() {
   };
   players.set(me.id, me);
 
+  const sendToPlayer = (targetId, msg) => {
+    if (targetId === me.id) handleServerMessage(msg);
+    else peerConns.get(targetId)?.send(msg);
+  };
+
+  const broadcastRoom = (msg) => {
+    handleServerMessage(msg);
+    for (const c of peerConns.values()) {
+      if (c.open) c.send(msg);
+    }
+  };
+
   const addBot = () => {
     const id = `bot_${botSeq++}`;
     const names = ['Bot_Viper', 'Bot_Ghost', 'Bot_Falcon', 'Bot_Reaper', 'Bot_Titan', 'Bot_Cobra'];
@@ -933,7 +1035,7 @@ function startLocalFallback() {
       invulnUntil: 0, lastDamagedAt: Date.now(), aiGoalX: 0, aiGoalZ: 0, aiNext: 0
     });
   };
-  for (let i = 0; i < 5; i++) addBot();
+  for (let i = 0; i < 4; i++) addBot();
 
   const fireShot = (shooter, origin, dir) => {
     if (shooter.dead) return;
@@ -960,7 +1062,7 @@ function startLocalFallback() {
       if (dB !== null && dB < closest) { closest = dB; hitTarget = t; hs = false; }
     }
 
-    handleServerMessage({
+    broadcastRoom({
       type: 'shot', id: shooter.id, weapon: shooter.weapon, origin,
       traces: [{
         x: +(origin.x + rayDir.x * closest).toFixed(2),
@@ -975,13 +1077,13 @@ function startLocalFallback() {
       hitTarget.hp = Math.max(0, hitTarget.hp - dmg);
       hitTarget.lastDamagedAt = now;
       const killed = hitTarget.hp <= 0;
-      if (shooter.id === me.id) handleServerMessage({ type: 'hitmarker', dmg, headshot: hs, killed });
-      if (hitTarget.id === me.id) handleServerMessage({ type: 'damaged', dmg, hp: hitTarget.hp });
+      sendToPlayer(shooter.id, { type: 'hitmarker', dmg, headshot: hs, killed });
+      sendToPlayer(hitTarget.id, { type: 'damaged', dmg, hp: hitTarget.hp });
       if (killed) {
         hitTarget.dead = true; hitTarget.deaths++; hitTarget.streak = 0; hitTarget.respawnAt = now + 3000;
         shooter.kills++; shooter.streak++;
         if (mode === 'TEAM') scores[shooter.team] = (scores[shooter.team] || 0) + 1;
-        handleServerMessage({
+        broadcastRoom({
           type: 'kill', killerId: shooter.id, killerName: shooter.name, killerTeam: shooter.team,
           victimId: hitTarget.id, victimName: hitTarget.name, victimTeam: hitTarget.team,
           weapon: wep.name, headshot: hs, streak: shooter.streak, scores
@@ -990,46 +1092,127 @@ function startLocalFallback() {
     }
   };
 
-  localFallback = {
-    onClientMsg(m) {
-      if (m.type === 'join') {
-        if (m.name) me.name = m.name;
-        if (m.weapon && WEAPONS[m.weapon]) { me.weapon = m.weapon; me.ammo = WEAPONS[m.weapon].magSize; }
-        if (m.team === 'BLUE' || m.team === 'RED') me.team = m.team;
-        if (m.mode) mode = m.mode;
-      } else if (m.type === 'move') {
-        me.x = m.x; me.y = m.y; me.z = m.z; me.yaw = m.yaw; me.pitch = m.pitch; me.crouch = m.crouch;
-      } else if (m.type === 'shoot') {
-        fireShot(me, m.origin, m.dir);
-      } else if (m.type === 'reload') {
-        me.reloadUntil = Date.now() + (WEAPONS[me.weapon]?.reloadMs || 1800);
-      } else if (m.type === 'weapon' && WEAPONS[m.weapon]) {
-        me.weapon = m.weapon; me.ammo = WEAPONS[m.weapon].magSize; me.reloadUntil = 0;
-      } else if (m.type === 'set_mode') {
-        mode = m.mode; scores.BLUE = 0; scores.RED = 0;
-      } else if (m.type === 'bot') {
-        if (m.action === 'add') addBot();
-        else {
-          for (const [k, v] of players.entries()) { if (v.isBot) { players.delete(k); break; } }
-        }
+  const applyPlayerAction = (actor, m) => {
+    if (m.type === 'join' || m.type === 'join_room') {
+      if (m.name) actor.name = String(m.name).slice(0, 16);
+      if (m.weapon && WEAPONS[m.weapon]) { actor.weapon = m.weapon; actor.ammo = WEAPONS[m.weapon].magSize; }
+      if (m.team === 'BLUE' || m.team === 'RED') actor.team = m.team;
+      if (m.mode) mode = m.mode;
+    } else if (m.type === 'move') {
+      actor.x = m.x; actor.y = m.y; actor.z = m.z; actor.yaw = m.yaw; actor.pitch = m.pitch; actor.crouch = m.crouch;
+    } else if (m.type === 'shoot') {
+      fireShot(actor, m.origin, m.dir);
+    } else if (m.type === 'reload') {
+      actor.reloadUntil = Date.now() + (WEAPONS[actor.weapon]?.reloadMs || 1800);
+    } else if (m.type === 'weapon' && WEAPONS[m.weapon]) {
+      actor.weapon = m.weapon; actor.ammo = WEAPONS[m.weapon].magSize; actor.reloadUntil = 0;
+    } else if (m.type === 'set_mode') {
+      mode = m.mode; scores.BLUE = 0; scores.RED = 0;
+    } else if (m.type === 'bot') {
+      if (m.action === 'add') addBot();
+      else {
+        for (const [k, v] of players.entries()) { if (v.isBot) { players.delete(k); break; } }
       }
     }
   };
 
+  // Connect P2P Room over WebRTC (PeerJS) so colleagues on Netlify can join the same Room Code!
+  const setupP2PRoom = async (roomCode) => {
+    try {
+      if (activePeer) { activePeer.destroy(); activePeer = null; }
+      peerConns.clear();
+      hostConn = null;
+      isP2PClient = false;
+
+      const { Peer } = await import('https://esm.sh/peerjs@1.5.4');
+      const roomPeerId = `webtdm-v1-room-${roomCode.toLowerCase()}`;
+      const peer = new Peer(roomPeerId);
+      activePeer = peer;
+
+      peer.on('open', () => {
+        isP2PClient = false;
+        peer.on('connection', (conn) => {
+          const pid = `peer_${conn.peer.slice(0, 6)}`;
+          const team = players.size % 2 === 0 ? 'BLUE' : 'RED';
+          const sp = pickSpawn(team);
+          const remoteP = {
+            id: pid, name: `Player_${pid.slice(-3)}`, team, isBot: false,
+            weapon: 'M416', ammo: 30, reloadUntil: 0, lastShotAt: 0,
+            x: sp.x, y: sp.y, z: sp.z, vx: 0, vy: 0, vz: 0, yaw: sp.yaw, pitch: 0,
+            crouch: false, ads: false, hp: 100, dead: false, kills: 0, deaths: 0, streak: 0,
+            invulnUntil: Date.now() + 2500, lastDamagedAt: Date.now()
+          };
+          players.set(pid, remoteP);
+          peerConns.set(pid, conn);
+
+          conn.on('open', () => {
+            conn.send({
+              type: 'init', id: pid, room: roomCode, team: remoteP.team, mode, scores, targetScore: 40,
+              x: remoteP.x, y: remoteP.y, z: remoteP.z, yaw: remoteP.yaw,
+              lanUrls: [window.location.origin]
+            });
+          });
+          conn.on('data', (data) => applyPlayerAction(remoteP, data));
+          conn.on('close', () => { players.delete(pid); peerConns.delete(pid); });
+        });
+      });
+
+      peer.on('error', (err) => {
+        if (err.type === 'unavailable-id') {
+          // Room host already exists on Netlify — join as P2P Client!
+          const clientPeer = new Peer();
+          activePeer = clientPeer;
+          clientPeer.on('open', () => {
+            const conn = clientPeer.connect(roomPeerId, { reliable: true });
+            hostConn = conn;
+            isP2PClient = true;
+            conn.on('open', () => {
+              conn.send({
+                type: 'join', room: roomCode, name: myState.name,
+                team: myState.preferredTeam, weapon: myState.weapon, mode: currentMode
+              });
+            });
+            conn.on('data', (msg) => handleServerMessage(msg));
+            conn.on('close', () => { isP2PClient = false; hostConn = null; });
+          });
+        }
+      });
+    } catch {
+      // Offline mode: local AI bot arena works without internet
+    }
+  };
+
+  localFallback = {
+    onClientMsg(m) {
+      if (m.type === 'join_room' && m.room) {
+        currentRoom = cleanRoomCode(m.room);
+        setupP2PRoom(currentRoom);
+      }
+      if (isP2PClient && hostConn && hostConn.open) {
+        hostConn.send(m);
+        return;
+      }
+      applyPlayerAction(me, m);
+    }
+  };
+
   handleServerMessage({
-    type: 'init', id: me.id, team: me.team, mode, scores, targetScore: 40,
+    type: 'init', id: me.id, room: currentRoom, team: me.team, mode, scores, targetScore: 40,
     x: me.x, y: me.y, z: me.z, yaw: me.yaw,
-    lanUrls: [`${window.location.origin} (Static Bot Arena)`]
+    lanUrls: [window.location.origin]
   });
 
+  setupP2PRoom(currentRoom);
+
   setInterval(() => {
+    if (isP2PClient) return;
     const now = Date.now();
     for (const p of players.values()) {
       if (p.dead && now >= p.respawnAt) {
         const sp = pickSpawn(p.team);
         p.x = sp.x; p.y = sp.y; p.z = sp.z; p.yaw = sp.yaw; p.hp = 100; p.dead = false;
         p.ammo = WEAPONS[p.weapon].magSize;
-        if (p.id === me.id) handleServerMessage({ type: 'respawn', x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: 100, ammo: p.ammo });
+        sendToPlayer(p.id, { type: 'respawn', room: currentRoom, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: 100, ammo: p.ammo });
       }
       if (!p.dead && p.reloadUntil > 0 && now >= p.reloadUntil) {
         p.reloadUntil = 0; p.ammo = WEAPONS[p.weapon].magSize;
@@ -1063,8 +1246,10 @@ function startLocalFallback() {
         }
       }
     }
-    handleServerMessage({
-      type: 'state', mode, scores, targetScore: mode === 'FFA' ? 20 : 40,
+    broadcastRoom({
+      type: 'state', room: currentRoom,
+      rooms: [{ code: currentRoom, mode, players: players.size }],
+      mode, scores, targetScore: mode === 'FFA' ? 20 : 40,
       remainingSec: Math.max(0, 600 - Math.floor((now - startedAt) / 1000)),
       ended: false, winnerText: '',
       players: [...players.values()].map((p) => ({

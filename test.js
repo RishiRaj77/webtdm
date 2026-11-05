@@ -16,8 +16,8 @@ resolvePlayerPhysics(dummy, 0.05, []);
 assert.equal(dummy.y, 0);
 assert.equal(dummy.grounded, true);
 
-// 3. Server HTTP + WebSocket multiplayer + TEAM & FFA mode verification
-const { server, players, match, addBot, removeBot } = createGameServer();
+// 3. Server HTTP + WebSocket multiplayer + TEAM, FFA & ROOMS verification
+const { server, rooms, players, match, addBot, removeBot } = createGameServer();
 
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const { port } = server.address();
@@ -84,6 +84,12 @@ assert.equal(match.mode, 'FFA');
 const bot = addBot();
 assert.ok(bot && bot.isBot);
 assert.equal(removeBot(), true);
+
+// Test creating and switching to a custom Room Code
+c2.ws.send(JSON.stringify({ type: 'join_room', room: 'OFFICE1', name: 'Colleague' }));
+await new Promise((r) => setTimeout(r, 50));
+assert.equal(rooms.has('OFFICE1'), true, 'Custom room OFFICE1 should be created');
+assert.equal(rooms.get('OFFICE1').players.has(c2.init.id), true, 'Player 2 should be in OFFICE1');
 
 c1.ws.close();
 c2.ws.close();
