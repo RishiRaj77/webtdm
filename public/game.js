@@ -1616,7 +1616,7 @@ function tryThrow(kind) {
 }
 
 // --- WEBSOCKET CONNECTION (+ CLOUDFLARE TUNNEL BRIDGE FOR NETLIFY) ---
-const ACTIVE_TUNNEL_HOST = 'friday-socket-certain-herb.trycloudflare.com';
+const ACTIVE_TUNNEL_HOST = 'other-hong-words-adipex.trycloudflare.com';
 const customServer = urlParams.get('server');
 const isStaticNetlify = window.location.hostname.endsWith('.netlify.app');
 const targetWsHost = customServer || (isStaticNetlify ? ACTIVE_TUNNEL_HOST : window.location.host);
